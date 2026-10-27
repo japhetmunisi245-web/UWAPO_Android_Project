@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">UWAPO</string>
+    <string name="app_subtitle">Usimamizi wa Wanachama</string>
+    <string name="local_only">KWENYE SIMU TU</string>
+    <string name="local_demo_mode">Hali ya majaribio kwenye simu</string>
+
+    <!-- Navigation Tabs -->
+    <string name="tab_home">Nyumbani</string>
+    <string name="tab_members">Wanachama</string>
+    <string name="tab_payments">Malipo</string>
+    <string name="tab_finance">Fedha</string>
+    <string name="tab_reports">Ripoti</string>
+
+    <!-- Content Descriptions & Actions -->
+    <string name="add_member">Ongeza mwanachama</string>
+    <string name="record_payment">Weka malipo</string>
+    <string name="record_expense">Weka matumizi</string>
+
+    <!-- Dashboard Screen -->
+    <string name="dashboard_title">Dashibodi</string>
+    <string name="financial_overview">Muhtasari wa kifedha · %1$s</string>
+    <string name="active_members">Wanachama hai</string>
+    <string name="payments_recorded">Malipo yaliyowekwa</string>
+    <string name="collected_this_month">Yaliyokusanywa mwezi huu</string>
+    <string name="all_time_recorded">Jumla yote iliyowekwa</string>
+    <string name="expected_this_month">Inayotarajiwa mwezi huu</string>
+    <string name="outstanding_estimate">Kadirio la madeni</string>
+    <string name="contribution_target">Lengo la mchango la UWAPO</string>
+    <string name="target_amount_description">TZS 10,000 kwa mwanachama / mwezi</string>
+    <string name="target_default_note">Kiwango cha kawaida cha mwezi: TZS 10,000</string>
+    <string name="getting_started">Anza hapa</string>
+    <string name="getting_started_desc">Ongeza wanachama, weka malipo yao ya kila mwezi, kisha kagua vichupo vya Malipo na Ripoti.</string>
+    <string name="local_storage_warning">Kumbukumbu zote zimehifadhiwa kwenye simu hii. Pakua nakala za CSV mara kwa mara kulinda kumbukumbu zako.</string>
+
+    <!-- Members Screen -->
+    <string name="members_title">Wanachama</string>
+    <string name="count_registered">%1$d wamesajiliwa</string>
+    <string name="search_members_hint">Tafuta jina, namba, au simu</string>
+    <string name="import_csv">Ingiza wanachama na malipo ya nyuma (CSV)</string>
+
+    <!-- Empty States -->
+    <string name="no_matching_members">Hakuna mwanachama aliyepatikana</string>
+    <string name="register_first_member">Gusa + kumsajili mwanachama wa kwanza.</string>
+    <string name="try_another_search">Jaribu kutafuta tena.</string>
+    <string name="no_payments_yet">Bado hakuna malipo</string>
+    <string name="record_first_payment">Gusa + kuweka mchango wa mwanachama.</string>
+    <string name="no_expenses_recorded">Hakuna matumizi yaliyowekwa</string>
+    <string name="enter_first_expense">Gusa + kuweka matumizi ya kikundi.</string>
+
+    <!-- Payments Screen -->
+    <string name="payments_title">Malipo</string>
+    <string name="count_payment_records">Kumbukumbu %1$d za malipo</string>
+    <string name="unknown_member">Mwanachama asiyejulikana</string>
+    <string name="receipt_info">Risiti: %1$s · %2$s</string>
+    <string name="status_reversed">Yamefutwa</string>
+    <string name="status_stored_device">Yamehifadhiwa kwenye simu hii</string>
+    <string name="reverse_payment">Futa / Rudisha malipo</string>
+
+    <!-- Finance Screen -->
+    <string name="club_finance_title">Fedha za kikundi</string>
+    <string name="finance_approval_note">Matumizi yanahitaji idhini ya kamati kabla ya kuathiri urari rasmi.</string>
+    <string name="approve_and_post">Thibitisha na weka (Mwenyekiti/Msimamizi)</string>
+
+    <!-- Reports Screen -->
+    <string name="reports_title">Ripoti</string>
+    <string name="export_csv">Pakua CSV ya wanachama na malipo</string>
+    <string name="current_month_recorded">Yaliyowekwa mwezi huu</string>
+    <string name="expected_month_formula">Inayotarajiwa mwezi huu (wanachama hai × TZS 10,000)</string>
+    <string name="members_in_database">Wanachama kwenye hifadhidata ya simu</string>
+    <string name="payment_records">Kumbukumbu za malipo</string>
+    <string name="export_backup_warning">Jumla hizi zinajumuisha kumbukumbu zilizohifadhiwa kwenye simu hii tu. Pakua nakala mara kwa mara.</string>
+
+    <!-- Dialogs -->
+    <string name="dialog_register_member">Sajili mwanachama</string>
+    <string name="label_member_number">Namba ya uanachama</string>
+    <string name="label_full_name">Jina kamili</string>
+    <string name="label_phone_optional">Namba ya simu (hiari)</string>
+    <string name="error_member_fields_required">Namba ya uanachama na jina kamili vinahitajika.</string>
+    <string name="btn_save_member">Hifadhi mwanachama</string>
+
+    <string name="dialog_record_contribution">Weka mchango</string>
+    <string name="msg_register_member_first">Sajili mwanachama kabla ya kuweka malipo.</string>
+    <string name="label_member">Mwanachama</string>
+    <string name="select_member">Chagua mwanachama</string>
+    <string name="label_amount_tzs">Kiasi (TZS)</string>
+    <string name="label_month">Mwezi (1-12)</string>
+    <string name="label_year">Mwaka</string>
+    <string name="label_payment_method">Njia ya malipo</string>
+    <string name="btn_save_payment">Hifadhi malipo</string>
+
+    <string name="dialog_record_expense">Weka matumizi</string>
+    <string name="label_category">Kipengele / Aina</string>
+    <string name="label_description">Maelezo</string>
+    <string name="expense_pending_note">Imehifadhiwa inasubiri idhini; haijajumuishwa kwenye salio la akaunti.</string>
+    <string name="btn_save_expense">Hifadhi matumizi</string>
+
+    <string name="dialog_reverse_payment_title">Futa / Rudisha malipo?</string>
+    <string name="reverse_payment_note">Hii inatengeneza kumbukumbu ya kurudisha. Malipo ya awali yatabaki kwenye historia.</string>
+    <string name="label_reversal_reason">Sababu ya kufuta malipo</string>
+    <string name="error_reversal_reason_min_length">Ingiza sababu ya angalau herufi 5.</string>
+
+    <string name="btn_cancel">Ghairi</string>
+
+    <!-- Payment Methods -->
+    <string name="method_cash">Pesa taslimu</string>
+    <string name="method_bank">Benki</string>
+    <string name="method_mobile_money">Pesa za simu (Mobile Money)</string>
+    <string name="method_other">Nyingine</string>
+
+    <!-- Toasts and Messages -->
+    <string name="toast_import_complete">Uingizaji umekamilika: wanachama %1$d, malipo %2$d yameongezwa; mistari %3$d imerukwa.</string>
+    <string name="toast_import_failed">Uingizaji kumeshindikana: %1$s</string>
+    <string name="toast_csv_saved">Faili la CSV limehifadhiwa.</string>
+    <string name="toast_export_failed">Upakuaji kumeshindikana: %1$s</string>
+    <string name="toast_payment_saved">Malipo yamehifadhiwa kwenye simu hii.</string>
+    <string name="toast_payment_save_failed">Haikuwezekana kuhifadhi malipo: %1$s</string>
+    <string name="toast_expense_saved">Matumizi yamehifadhiwa kwenye simu yakisubiri idhini.</string>
+    <string name="toast_expense_save_failed">Haikuwezekana kuhifadhi matumizi: %1$s</string>
+    <string name="toast_expense_paid">Matumizi yametiwa alama kuwa yamelipwa kwenye simu hii.</string>
+    <string name="toast_payment_reversed">Malipo yamerudishwa kwenye simu; historia ya awali imehifadhiwa.</string>
+    <string name="toast_reversal_failed">Kufuta malipo kumeshindikana: %1$s</string>
+
+    <!-- Validation Errors -->
+    <string name="error_select_member">Chagua mwanachama kwanza.</string>
+    <string name="error_valid_positive_amount">Ingiza kiasi halali cha fedha.</string>
+    <string name="error_valid_month">Mwezi lazima uwe kati ya 1 na 12.</string>
+    <string name="error_valid_year">Ingiza mwaka halali.</string>
+
+    <!-- Language Selector -->
+    <string name="language_swahili">Kiswahili</string>
+    <string name="language_english">English</string>
+    <string name="switch_language">Lugha / Language</string>
+</resources>

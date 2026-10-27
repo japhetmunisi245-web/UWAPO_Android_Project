@@ -1,0 +1,6 @@
+# Android Studio may add sdk.dir here automatically. Never commit local.properties.
+# Supabase project URL, e.g. https://YOUR_PROJECT_REF.supabase.co
+uwapo.supabase.url=
+# Supabase publishable/anon key only. NEVER use the service-role key in Android.
+uwapo.supabase.anon_key=
+# sdk.dir=/path/to/Android/Sdk

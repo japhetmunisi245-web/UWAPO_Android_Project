@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">UWAPO</string>
+    <string name="app_subtitle">Membership Management</string>
+    <string name="local_only">LOCAL ONLY</string>
+    <string name="local_demo_mode">Local demo mode</string>
+
+    <!-- Navigation Tabs -->
+    <string name="tab_home">Home</string>
+    <string name="tab_members">Members</string>
+    <string name="tab_payments">Payments</string>
+    <string name="tab_finance">Finance</string>
+    <string name="tab_reports">Reports</string>
+
+    <!-- Content Descriptions & Actions -->
+    <string name="add_member">Add member</string>
+    <string name="record_payment">Record payment</string>
+    <string name="record_expense">Record expense</string>
+
+    <!-- Dashboard Screen -->
+    <string name="dashboard_title">Dashboard</string>
+    <string name="financial_overview">Financial overview · %1$s</string>
+    <string name="active_members">Active members</string>
+    <string name="payments_recorded">Payments recorded</string>
+    <string name="collected_this_month">Collected this month</string>
+    <string name="all_time_recorded">All-time recorded</string>
+    <string name="expected_this_month">Expected this month</string>
+    <string name="outstanding_estimate">Outstanding estimate</string>
+    <string name="contribution_target">UWAPO contribution target</string>
+    <string name="target_amount_description">TZS 10,000 per member / month</string>
+    <string name="target_default_note">Monthly contribution default: TZS 10,000</string>
+    <string name="getting_started">Getting started</string>
+    <string name="getting_started_desc">Add members, record their monthly payments, then review the Payments and Reports tabs.</string>
+    <string name="local_storage_warning">All records are stored locally on this device. Export regular CSV backups to protect your records.</string>
+
+    <!-- Members Screen -->
+    <string name="members_title">Members</string>
+    <string name="count_registered">%1$d registered</string>
+    <string name="search_members_hint">Search name, number, or phone</string>
+    <string name="import_csv">Import members and historical payments (CSV)</string>
+
+    <!-- Empty States -->
+    <string name="no_matching_members">No matching members</string>
+    <string name="register_first_member">Tap + to register the first member.</string>
+    <string name="try_another_search">Try another search.</string>
+    <string name="no_payments_yet">No payments yet</string>
+    <string name="record_first_payment">Tap + to record a member contribution.</string>
+    <string name="no_expenses_recorded">No expenses recorded</string>
+    <string name="enter_first_expense">Tap + to enter a club expense.</string>
+
+    <!-- Payments Screen -->
+    <string name="payments_title">Payments</string>
+    <string name="count_payment_records">%1$d payment records</string>
+    <string name="unknown_member">Unknown member</string>
+    <string name="receipt_info">Receipt: %1$s · %2$s</string>
+    <string name="status_reversed">Reversed</string>
+    <string name="status_stored_device">Stored on this device</string>
+    <string name="reverse_payment">Reverse payment</string>
+
+    <!-- Finance Screen -->
+    <string name="club_finance_title">Club finance</string>
+    <string name="finance_approval_note">Expenses require committee approval before they affect the official balance.</string>
+    <string name="approve_and_post">Approve and post (chairperson/admin)</string>
+
+    <!-- Reports Screen -->
+    <string name="reports_title">Reports</string>
+    <string name="export_csv">Export member and payment CSV</string>
+    <string name="current_month_recorded">Current month recorded</string>
+    <string name="expected_month_formula">Expected this month (active members × TZS 10,000)</string>
+    <string name="members_in_database">Members in local database</string>
+    <string name="payment_records">Payment records</string>
+    <string name="export_backup_warning">These totals include records stored on this device only. Export backups regularly.</string>
+
+    <!-- Dialogs -->
+    <string name="dialog_register_member">Register member</string>
+    <string name="label_member_number">Membership number</string>
+    <string name="label_full_name">Full name</string>
+    <string name="label_phone_optional">Phone (optional)</string>
+    <string name="error_member_fields_required">Membership number and full name are required.</string>
+    <string name="btn_save_member">Save member</string>
+
+    <string name="dialog_record_contribution">Record contribution</string>
+    <string name="msg_register_member_first">Register a member before recording a payment.</string>
+    <string name="label_member">Member</string>
+    <string name="select_member">Select member</string>
+    <string name="label_amount_tzs">Amount (TZS)</string>
+    <string name="label_month">Month (1-12)</string>
+    <string name="label_year">Year</string>
+    <string name="label_payment_method">Payment method</string>
+    <string name="btn_save_payment">Save payment</string>
+
+    <string name="dialog_record_expense">Record expense</string>
+    <string name="label_category">Category</string>
+    <string name="label_description">Description</string>
+    <string name="expense_pending_note">Saved as pending approval; not included in account balance.</string>
+    <string name="btn_save_expense">Save expense</string>
+
+    <string name="dialog_reverse_payment_title">Reverse payment?</string>
+    <string name="reverse_payment_note">This creates a reversal entry. The original payment will remain in the audit history.</string>
+    <string name="label_reversal_reason">Reason for reversal</string>
+    <string name="error_reversal_reason_min_length">Enter a reason of at least 5 characters.</string>
+
+    <string name="btn_cancel">Cancel</string>
+
+    <!-- Payment Methods -->
+    <string name="method_cash">Cash</string>
+    <string name="method_bank">Bank</string>
+    <string name="method_mobile_money">Mobile Money</string>
+    <string name="method_other">Other</string>
+
+    <!-- Toasts and Messages -->
+    <string name="toast_import_complete">Import complete: %1$d members, %2$d payments added; %3$d rows skipped.</string>
+    <string name="toast_import_failed">Import failed: %1$s</string>
+    <string name="toast_csv_saved">CSV export saved.</string>
+    <string name="toast_export_failed">Export failed: %1$s</string>
+    <string name="toast_payment_saved">Payment saved on this device.</string>
+    <string name="toast_payment_save_failed">Could not save payment: %1$s</string>
+    <string name="toast_expense_saved">Expense saved locally as pending approval.</string>
+    <string name="toast_expense_save_failed">Could not save expense: %1$s</string>
+    <string name="toast_expense_paid">Expense marked paid on this device.</string>
+    <string name="toast_payment_reversed">Payment reversed locally; original history retained.</string>
+    <string name="toast_reversal_failed">Reversal failed: %1$s</string>
+
+    <!-- Validation Errors -->
+    <string name="error_select_member">Select a member first.</string>
+    <string name="error_valid_positive_amount">Enter a valid positive amount.</string>
+    <string name="error_valid_month">Month must be between 1 and 12.</string>
+    <string name="error_valid_year">Enter a valid year.</string>
+
+    <!-- Language Selector -->
+    <string name="language_swahili">Kiswahili</string>
+    <string name="language_english">English</string>
+    <string name="switch_language">Lugha / Language</string>
+</resources>
