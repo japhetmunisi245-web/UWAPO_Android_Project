@@ -5,7 +5,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [MemberEntity::class, PaymentEntity::class, ExpenseEntity::class], version = 3, exportSchema = false)
+@Database(entities = [MemberEntity::class, PaymentEntity::class, ExpenseEntity::class], version = 4, exportSchema = false)
 abstract class UWAPODatabase : RoomDatabase() {
     abstract fun uwapoDao(): UWAPODao
     companion object {
@@ -19,6 +19,12 @@ abstract class UWAPODatabase : RoomDatabase() {
                 db.execSQL("CREATE TABLE IF NOT EXISTS expenses (id TEXT NOT NULL PRIMARY KEY, category TEXT NOT NULL, description TEXT NOT NULL, amountTzs INTEGER NOT NULL, expenseDate INTEGER NOT NULL, accountName TEXT NOT NULL, status TEXT NOT NULL, syncStatus TEXT NOT NULL)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_expenses_expenseDate ON expenses(expenseDate)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_expenses_syncStatus ON expenses(syncStatus)")
+            }
+        }
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE members ADD COLUMN notes TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE expenses ADD COLUMN receiptImagePath TEXT NOT NULL DEFAULT ''")
             }
         }
     }

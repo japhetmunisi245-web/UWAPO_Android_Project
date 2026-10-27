@@ -5,6 +5,7 @@ import android.content.res.Configuration
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -15,9 +16,12 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.ReceiptLong
+import androidx.compose.material.icons.filled.Sms
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -34,6 +38,8 @@ import com.uwapo.app.data.ExpenseEntity
 import com.uwapo.app.data.MemberEntity
 import com.uwapo.app.data.PaymentEntity
 import com.uwapo.app.data.UWAPODao
+import com.uwapo.app.pdf.PdfGenerator
+import com.uwapo.app.reminders.ReminderManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -88,22 +94,41 @@ fun UWAPORoot(dao: UWAPODao) {
     val payments by dao.observePayments().collectAsState(initial = emptyList())
     val expenses by dao.observeExpenses().collectAsState(initial = emptyList())
     val cal = remember { Calendar.getInstance() }
-    val monthTotal by dao.observeMonthlyTotal(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1).collectAsState(initial = 0L)
+    val currentYear = cal.get(Calendar.YEAR)
+    val currentMonth = cal.get(Calendar.MONTH) + 1
+
+    val monthTotal by dao.observeMonthlyTotal(currentYear, currentMonth).collectAsState(initial = 0L)
+    val yearlyTotal by dao.observeYearlyTotal(currentYear).collectAsState(initial = 0L)
     val activeCount by dao.observeActiveMemberCount().collectAsState(initial = 0)
     val lifetimeTotal by dao.observeLifetimeTotal().collectAsState(initial = 0L)
+    val expensesTotal by dao.observePaidExpensesTotal().collectAsState(initial = 0L)
+
     var selectedTab by remember { mutableStateOf(Tab.HOME) }
     var showAddMember by remember { mutableStateOf(false) }
     var showPayment by remember { mutableStateOf(false) }
     var showExpense by remember { mutableStateOf(false) }
     var paymentToReverse by remember { mutableStateOf<PaymentEntity?>(null) }
+
+    var selectedMemberForProfile by remember { mutableStateOf<MemberEntity?>(null) }
+    var selectedPaymentForReceipt by remember { mutableStateOf<PaymentEntity?>(null) }
+    var selectedExpenseForDetail by remember { mutableStateOf<ExpenseEntity?>(null) }
+
     val scope = rememberCoroutineScope()
+
+    val currentPaidMemberIds = remember(payments, currentYear, currentMonth) {
+        payments.filter { it.periodYear == currentYear && it.periodMonth == currentMonth && it.syncStatus != "reversed" }
+            .map { it.memberId }.toSet()
+    }
+    val defaulters = remember(members, currentPaidMemberIds) {
+        members.filter { it.status == "active" && it.id !in currentPaidMemberIds }
+    }
 
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
                     context.contentResolver.openInputStream(uri)?.use { CsvImportExport.import(it, dao) }
-                        ?: throw IllegalStateException("Could not open the selected CSV file.")
+                        ?: throw IllegalStateException("Could not open the selected file.")
                 }
                 val msg = context.getString(R.string.toast_import_complete, result.membersAdded, result.paymentsAdded, result.rowsSkipped)
                 Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
@@ -187,17 +212,84 @@ fun UWAPORoot(dao: UWAPODao) {
         }
     ) { padding ->
         when (selectedTab) {
-            Tab.HOME -> DashboardScreen(Modifier.padding(padding), activeCount, monthTotal, lifetimeTotal, payments.size, currentLanguage)
-            Tab.MEMBERS -> MembersScreen(Modifier.padding(padding), members, onImport = { importLauncher.launch(arrayOf("text/*", "application/vnd.ms-excel")) })
-            Tab.PAYMENTS -> PaymentsScreen(Modifier.padding(padding), payments, members, onReverse = { paymentToReverse = it })
-            Tab.FINANCE -> FinanceScreen(Modifier.padding(padding), expenses, onApprove = { expense ->
-                scope.launch {
-                    dao.setExpenseLocalStatus(expense.id, "paid")
-                    Toast.makeText(context, context.getString(R.string.toast_expense_paid), Toast.LENGTH_LONG).show()
+            Tab.HOME -> DashboardScreen(Modifier.padding(padding), activeCount, monthTotal, lifetimeTotal, payments.size, currentLanguage, defaulters.size)
+            Tab.MEMBERS -> MembersScreen(
+                Modifier.padding(padding), members,
+                onImport = {
+                    importLauncher.launch(
+                        arrayOf(
+                            "text/*",
+                            "text/csv",
+                            "application/vnd.ms-excel",
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            "application/xlsx",
+                            "application/octet-stream"
+                        )
+                    )
+                },
+                onSelectMember = { selectedMemberForProfile = it }
+            )
+            Tab.PAYMENTS -> PaymentsScreen(
+                Modifier.padding(padding), payments, members,
+                onReverse = { paymentToReverse = it },
+                onSelectPayment = { selectedPaymentForReceipt = it }
+            )
+            Tab.FINANCE -> FinanceScreen(
+                Modifier.padding(padding), expenses,
+                onSelectExpense = { selectedExpenseForDetail = it },
+                onApprove = { expense ->
+                    scope.launch {
+                        dao.setExpenseLocalStatus(expense.id, "paid")
+                        Toast.makeText(context, context.getString(R.string.toast_expense_paid), Toast.LENGTH_LONG).show()
+                    }
                 }
-            })
-            Tab.REPORTS -> ReportsScreen(Modifier.padding(padding), monthTotal, lifetimeTotal, members.size, activeCount, payments.size, onExport = { exportLauncher.launch("uwapo-register-${System.currentTimeMillis()}.csv") })
+            )
+            Tab.REPORTS -> ReportsScreen(
+                Modifier.padding(padding), monthTotal, yearlyTotal, expensesTotal, members.size, activeCount, payments.size, defaulters,
+                onExport = { exportLauncher.launch("uwapo-register-${System.currentTimeMillis()}.csv") }
+            )
         }
+    }
+
+    selectedMemberForProfile?.let { member ->
+        MemberProfileDialog(
+            member = member,
+            payments = payments,
+            onDismiss = { selectedMemberForProfile = null },
+            onUpdateProfile = { phone, status, notes ->
+                scope.launch {
+                    dao.updateMemberProfile(member.id, phone, status, notes)
+                    selectedMemberForProfile = null
+                }
+            }
+        )
+    }
+
+    selectedPaymentForReceipt?.let { payment ->
+        val member = members.firstOrNull { it.id == payment.memberId }
+        ReceiptViewerDialog(
+            payment = payment,
+            member = member,
+            onDismiss = { selectedPaymentForReceipt = null }
+        )
+    }
+
+    selectedExpenseForDetail?.let { expense ->
+        ExpenseDetailDialog(
+            expense = expense,
+            onDismiss = { selectedExpenseForDetail = null },
+            onUpdateStatus = { newStatus ->
+                scope.launch {
+                    dao.setExpenseLocalStatus(expense.id, newStatus)
+                    selectedExpenseForDetail = null
+                }
+            },
+            onAttachReceiptPhoto = { imagePath ->
+                scope.launch {
+                    dao.setExpenseReceiptImage(expense.id, imagePath)
+                }
+            }
+        )
     }
 
     if (showAddMember) {
@@ -261,9 +353,11 @@ fun UWAPORoot(dao: UWAPODao) {
 }
 
 @Composable
-private fun DashboardScreen(modifier: Modifier, activeCount: Int, monthTotal: Long, lifetimeTotal: Long, paymentCount: Int, language: String) {
+private fun DashboardScreen(modifier: Modifier, activeCount: Int, monthTotal: Long, lifetimeTotal: Long, paymentCount: Int, language: String, defaultersCount: Int) {
     val locale = remember(language) { Locale(language) }
     val month = remember(locale) { SimpleDateFormat("MMMM yyyy", locale).format(Date()) }
+    val context = LocalContext.current
+
     Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text(stringResource(R.string.dashboard_title), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
         Text(stringResource(R.string.financial_overview, month), color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -281,19 +375,29 @@ private fun DashboardScreen(modifier: Modifier, activeCount: Int, monthTotal: Lo
             MetricCard(stringResource(R.string.expected_this_month), money(expected), Modifier.weight(1f))
             MetricCard(stringResource(R.string.outstanding_estimate), money(outstanding), Modifier.weight(1f))
         }
+
+        if (defaultersCount > 0) {
+            Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                Row(Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.defaulters_list), fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.defaulters_count, defaultersCount), style = MaterialTheme.typography.bodySmall)
+                    }
+                    IconButton(onClick = {
+                        ReminderManager.sendDueDateNotification(context, defaultersCount)
+                        Toast.makeText(context, context.getString(R.string.reminder_sent), Toast.LENGTH_SHORT).show()
+                    }) {
+                        Icon(Icons.Default.Notifications, contentDescription = stringResource(R.string.send_due_notification))
+                    }
+                }
+            }
+        }
+
         Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary)) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(stringResource(R.string.contribution_target), color = MaterialTheme.colorScheme.onPrimary.copy(alpha = .8f))
                 Text(stringResource(R.string.target_amount_description), color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                 Text(stringResource(R.string.target_default_note), color = MaterialTheme.colorScheme.onPrimary.copy(alpha = .8f), style = MaterialTheme.typography.bodySmall)
-            }
-        }
-        Card {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(stringResource(R.string.getting_started), fontWeight = FontWeight.SemiBold)
-                Text(stringResource(R.string.getting_started_desc))
-                Text(stringResource(R.string.local_demo_mode), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
-                Text(stringResource(R.string.local_storage_warning), style = MaterialTheme.typography.bodySmall)
             }
         }
     }
@@ -310,13 +414,39 @@ private fun MetricCard(title: String, value: String, modifier: Modifier = Modifi
 }
 
 @Composable
-private fun MembersScreen(modifier: Modifier, members: List<MemberEntity>, onImport: () -> Unit) {
+private fun MembersScreen(
+    modifier: Modifier,
+    members: List<MemberEntity>,
+    onImport: () -> Unit,
+    onSelectMember: (MemberEntity) -> Unit
+) {
     var search by remember { mutableStateOf("") }
-    val filtered = remember(members, search) { members.filter { it.fullName.contains(search, true) || it.memberNo.contains(search, true) || it.phone.contains(search, true) } }
+    var selectedStatusFilter by remember { mutableStateOf("all") }
+
+    val filtered = remember(members, search, selectedStatusFilter) {
+        members.filter { m ->
+            (selectedStatusFilter == "all" || m.status.equals(selectedStatusFilter, true)) &&
+            (m.fullName.contains(search, true) || m.memberNo.contains(search, true) || m.phone.contains(search, true))
+        }
+    }
+
     Column(modifier.fillMaxSize().padding(16.dp)) {
         Text(stringResource(R.string.members_title), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
         Text(stringResource(R.string.count_registered, members.size), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(8.dp))
         OutlinedTextField(search, { search = it }, label = { Text(stringResource(R.string.search_members_hint)) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+        Spacer(Modifier.height(8.dp))
+
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf("all", "active", "inactive", "suspended").forEach { s ->
+                FilterChip(
+                    selected = selectedStatusFilter == s,
+                    onClick = { selectedStatusFilter = s },
+                    label = { Text(s.replaceFirstChar { it.uppercase() }) }
+                )
+            }
+        }
+
         Spacer(Modifier.height(8.dp))
         OutlinedButton(onClick = onImport, modifier = Modifier.fillMaxWidth()) {
             Icon(Icons.Default.FileDownload, contentDescription = null)
@@ -324,6 +454,7 @@ private fun MembersScreen(modifier: Modifier, members: List<MemberEntity>, onImp
             Text(stringResource(R.string.import_csv))
         }
         Spacer(Modifier.height(8.dp))
+
         if (filtered.isEmpty()) {
             EmptyState(
                 stringResource(R.string.no_matching_members),
@@ -332,7 +463,7 @@ private fun MembersScreen(modifier: Modifier, members: List<MemberEntity>, onImp
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(filtered, key = { it.id }) { member ->
-                    Card {
+                    Card(modifier = Modifier.clickable { onSelectMember(member) }) {
                         Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                             Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primaryContainer) {
                                 Text(member.fullName.take(1).uppercase(), Modifier.padding(horizontal = 14.dp, vertical = 10.dp), fontWeight = FontWeight.Bold)
@@ -352,7 +483,13 @@ private fun MembersScreen(modifier: Modifier, members: List<MemberEntity>, onImp
 }
 
 @Composable
-private fun PaymentsScreen(modifier: Modifier, payments: List<PaymentEntity>, members: List<MemberEntity>, onReverse: (PaymentEntity) -> Unit) {
+private fun PaymentsScreen(
+    modifier: Modifier,
+    payments: List<PaymentEntity>,
+    members: List<MemberEntity>,
+    onReverse: (PaymentEntity) -> Unit,
+    onSelectPayment: (PaymentEntity) -> Unit
+) {
     val memberMap = remember(members) { members.associateBy { it.id } }
     Column(modifier.fillMaxSize().padding(16.dp)) {
         Text(stringResource(R.string.payments_title), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
@@ -363,7 +500,7 @@ private fun PaymentsScreen(modifier: Modifier, payments: List<PaymentEntity>, me
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(payments, key = { it.id }) { payment ->
-                    Card {
+                    Card(modifier = Modifier.clickable { onSelectPayment(payment) }) {
                         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(memberMap[payment.memberId]?.fullName ?: stringResource(R.string.unknown_member), Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
@@ -371,8 +508,13 @@ private fun PaymentsScreen(modifier: Modifier, payments: List<PaymentEntity>, me
                             }
                             Text("${payment.periodMonth.toString().padStart(2, '0')}/${payment.periodYear} · ${methodLabel(payment.method)}", style = MaterialTheme.typography.bodySmall)
                             val syncText = if (payment.syncStatus == "reversed") stringResource(R.string.status_reversed) else stringResource(R.string.status_stored_device)
-                            Text(stringResource(R.string.receipt_info, payment.receiptNo, syncText), style = MaterialTheme.typography.labelSmall, color = if (payment.syncStatus == "reversed") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
-                            if (payment.syncStatus != "reversed") TextButton(onClick = { onReverse(payment) }) { Text(stringResource(R.string.reverse_payment)) }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(stringResource(R.string.receipt_info, payment.receiptNo, syncText), Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = if (payment.syncStatus == "reversed") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+                                Icon(Icons.Default.PictureAsPdf, contentDescription = "Receipt PDF", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                            }
+                            if (payment.syncStatus != "reversed") {
+                                TextButton(onClick = { onReverse(payment) }) { Text(stringResource(R.string.reverse_payment)) }
+                            }
                         }
                     }
                 }
@@ -382,21 +524,93 @@ private fun PaymentsScreen(modifier: Modifier, payments: List<PaymentEntity>, me
 }
 
 @Composable
-private fun ReportsScreen(modifier: Modifier, monthTotal: Long, lifetimeTotal: Long, memberCount: Int, activeCount: Int, paymentCount: Int, onExport: () -> Unit) {
+private fun ReportsScreen(
+    modifier: Modifier,
+    monthTotal: Long,
+    yearlyTotal: Long,
+    expensesTotal: Long,
+    memberCount: Int,
+    activeCount: Int,
+    paymentCount: Int,
+    defaulters: List<MemberEntity>,
+    onExport: () -> Unit
+) {
+    val context = LocalContext.current
+    val monthStr = SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(Date())
+
     Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(stringResource(R.string.reports_title), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-        OutlinedButton(onClick = onExport, modifier = Modifier.fillMaxWidth()) {
-            Icon(Icons.Default.FileDownload, contentDescription = null)
-            Spacer(Modifier.width(8.dp))
-            Text(stringResource(R.string.export_csv))
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onExport, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Default.FileDownload, contentDescription = null)
+                Spacer(Modifier.width(4.dp))
+                Text("CSV Export", style = MaterialTheme.typography.labelSmall)
+            }
+
+            Button(
+                onClick = {
+                    val file = PdfGenerator.generateReportPdf(
+                        context,
+                        "Monthly Report - $monthStr",
+                        monthTotal,
+                        yearlyTotal,
+                        expensesTotal,
+                        memberCount,
+                        defaulters
+                    )
+                    PdfGenerator.viewPdf(context, file)
+                },
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(Icons.Default.PictureAsPdf, contentDescription = null)
+                Spacer(Modifier.width(4.dp))
+                Text("PDF Report", style = MaterialTheme.typography.labelSmall)
+            }
         }
-        MetricCard(stringResource(R.string.current_month_recorded), money(monthTotal), Modifier.fillMaxWidth())
-        MetricCard(stringResource(R.string.expected_month_formula), money(activeCount.toLong() * 10000L), Modifier.fillMaxWidth())
-        MetricCard(stringResource(R.string.outstanding_estimate), money((activeCount.toLong() * 10000L - monthTotal).coerceAtLeast(0L)), Modifier.fillMaxWidth())
-        MetricCard(stringResource(R.string.all_time_recorded), money(lifetimeTotal), Modifier.fillMaxWidth())
-        MetricCard(stringResource(R.string.members_in_database), memberCount.toString(), Modifier.fillMaxWidth())
-        MetricCard(stringResource(R.string.payment_records), paymentCount.toString(), Modifier.fillMaxWidth())
-        Text(stringResource(R.string.export_backup_warning), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            item {
+                MetricCard(stringResource(R.string.current_month_recorded), money(monthTotal), Modifier.fillMaxWidth())
+            }
+            item {
+                MetricCard(stringResource(R.string.yearly_summary, money(yearlyTotal)), money(yearlyTotal), Modifier.fillMaxWidth())
+            }
+            item {
+                MetricCard(stringResource(R.string.contributions_vs_expenses), "Collections: ${money(yearlyTotal)}\nExpenses: ${money(expensesTotal)}\nNet: ${money(yearlyTotal - expensesTotal)}", Modifier.fillMaxWidth())
+            }
+            item {
+                MetricCard(stringResource(R.string.expected_month_formula), money(activeCount.toLong() * 10000L), Modifier.fillMaxWidth())
+            }
+            item {
+                MetricCard(stringResource(R.string.outstanding_estimate), money((activeCount.toLong() * 10000L - monthTotal).coerceAtLeast(0L)), Modifier.fillMaxWidth())
+            }
+
+            item {
+                Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                    Column(Modifier.padding(14.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(stringResource(R.string.defaulters_list), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                        if (defaulters.isEmpty()) {
+                            Text(stringResource(R.string.no_defaulters), color = MaterialTheme.colorScheme.primary)
+                        } else {
+                            Text(stringResource(R.string.defaulters_count, defaulters.size), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                            defaulters.take(10).forEach { m ->
+                                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Text("${m.fullName} (${m.memberNo})", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                                    if (m.phone.isNotBlank()) {
+                                        IconButton(onClick = {
+                                            ReminderManager.sendSmsReminder(context, m.phone, m.fullName, monthStr)
+                                        }) {
+                                            Icon(Icons.Default.Sms, contentDescription = "SMS", tint = MaterialTheme.colorScheme.primary)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -411,7 +625,12 @@ private fun EmptyState(title: String, subtitle: String) {
 }
 
 @Composable
-private fun FinanceScreen(modifier: Modifier, expenses: List<ExpenseEntity>, onApprove: (ExpenseEntity) -> Unit) {
+private fun FinanceScreen(
+    modifier: Modifier,
+    expenses: List<ExpenseEntity>,
+    onSelectExpense: (ExpenseEntity) -> Unit,
+    onApprove: (ExpenseEntity) -> Unit
+) {
     Column(modifier.fillMaxSize().padding(16.dp)) {
         Text(stringResource(R.string.club_finance_title), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
         Text(stringResource(R.string.finance_approval_note), color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -421,14 +640,14 @@ private fun FinanceScreen(modifier: Modifier, expenses: List<ExpenseEntity>, onA
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(expenses, key = { it.id }) { expense ->
-                    Card {
+                    Card(modifier = Modifier.clickable { onSelectExpense(expense) }) {
                         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(expense.category, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
                                 Text(money(expense.amountTzs), fontWeight = FontWeight.Bold)
                             }
                             Text(expense.description)
-                            Text("${SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(expense.expenseDate))} · ${expense.status.replace('_', ' ')}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("${SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(expense.expenseDate))} · ${expense.status.replace('_', ' ').uppercase()}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             if (expense.status == "pending_approval") {
                                 TextButton(onClick = { onApprove(expense) }) { Text(stringResource(R.string.approve_and_post)) }
                             }

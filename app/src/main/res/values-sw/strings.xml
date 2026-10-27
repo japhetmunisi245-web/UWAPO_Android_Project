@@ -37,7 +37,7 @@
     <string name="members_title">Wanachama</string>
     <string name="count_registered">%1$d wamesajiliwa</string>
     <string name="search_members_hint">Tafuta jina, namba, au simu</string>
-    <string name="import_csv">Ingiza wanachama na malipo ya nyuma (CSV)</string>
+    <string name="import_csv">Ingiza wanachama na malipo ya nyuma (CSV / XLSX)</string>
 
     <!-- Empty States -->
     <string name="no_matching_members">Hakuna mwanachama aliyepatikana</string>
@@ -84,7 +84,7 @@
     <string name="label_member">Mwanachama</string>
     <string name="select_member">Chagua mwanachama</string>
     <string name="label_amount_tzs">Kiasi (TZS)</string>
-    <string name="label_month">Mwezi (1-12)</string>
+    <string name="label_month">Mwezi (1–12)</string>
     <string name="label_year">Mwaka</string>
     <string name="label_payment_method">Njia ya malipo</string>
     <string name="btn_save_payment">Hifadhi malipo</string>
@@ -131,4 +131,47 @@
     <string name="language_swahili">Kiswahili</string>
     <string name="language_english">English</string>
     <string name="switch_language">Lugha / Language</string>
+
+    <!-- Member Profile & Details -->
+    <string name="member_profile">Taarifa za Mwanachama</string>
+    <string name="label_notes">Dokezo / Maelezo</string>
+    <string name="label_status">Hali</string>
+    <string name="status_active">Hai</string>
+    <string name="status_inactive">Si hai</string>
+    <string name="status_suspended">Amesimamishwa</string>
+    <string name="joined_date">Amejiunga: %1$s</string>
+    <string name="send_sms_reminder">Tuma Ujumbe wa SMS</string>
+    <string name="view_statement">Angalia Taarifa za Malipo (PDF)</string>
+    <string name="edit_profile">Hariri Taarifa</string>
+    <string name="member_statement">Taarifa ya Mwanachama</string>
+    <string name="btn_save_changes">Hifadhi Mabadiliko</string>
+
+    <!-- PDF & Share -->
+    <string name="generate_pdf_receipt">Risiti ya PDF</string>
+    <string name="share_receipt">Tuma PDF</string>
+    <string name="view_pdf">Fungua / Chapa PDF</string>
+    <string name="generate_pdf_report">Pakua Ripoti ya PDF</string>
+
+    <!-- Defaulters & Reminders -->
+    <string name="defaulters_list">Orodha ya Wenye Madeni</string>
+    <string name="defaulters_count">Wanachama %1$d hai bado hawajalipa mwezi huu</string>
+    <string name="no_defaulters">Wanachama wote hai wamelipa mwezi huu!</string>
+    <string name="send_due_notification">Tuma Kikumbusho cha Tarehe</string>
+    <string name="reminder_sent">Kikumbusho kimetumwa!</string>
+
+    <!-- Expenses & Photo -->
+    <string name="expense_receipt_photo">Picha ya Risiti</string>
+    <string name="attach_photo">Weka Picha</string>
+    <string name="take_photo">Piga / Chagua Picha</string>
+    <string name="approve">Thibitisha</string>
+    <string name="reject">Kataa</string>
+    <string name="status_approved">Yamethibitishwa</string>
+    <string name="status_rejected">Yamekataliwa</string>
+    <string name="status_pending_approval">Yanasubiri idhini</string>
+
+    <!-- Reports -->
+    <string name="yearly_summary">Jumla ya Mwaka: %1$s</string>
+    <string name="contributions_vs_expenses">Michango ikilinganishwa na Matumizi</string>
+    <string name="filter_status">Chuja kwa Hali</string>
+    <string name="all_statuses">Hali Zote</string>
 </resources>

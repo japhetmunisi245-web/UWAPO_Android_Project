@@ -13,7 +13,8 @@ data class MemberEntity(
     val phone: String = "",
     val joinedAt: Long = System.currentTimeMillis(),
     val status: String = "active",
-    val syncStatus: String = "local"
+    val syncStatus: String = "local",
+    val notes: String = ""
 )
 
 @Entity(
@@ -43,5 +44,6 @@ data class ExpenseEntity(
     val expenseDate: Long = System.currentTimeMillis(),
     val accountName: String = "Cash",
     val status: String = "pending_approval",
-    val syncStatus: String = "local"
+    val syncStatus: String = "local",
+    val receiptImagePath: String = ""
 )

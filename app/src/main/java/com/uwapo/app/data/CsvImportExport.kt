@@ -1,11 +1,15 @@
 package com.uwapo.app.data
 
+import org.w3c.dom.Element
+import java.io.ByteArrayInputStream
 import java.io.InputStream
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.UUID
+import java.util.zip.ZipInputStream
+import javax.xml.parsers.DocumentBuilderFactory
 
 object CsvImportExport {
     data class ImportResult(val membersAdded: Int, val paymentsAdded: Int, val rowsSkipped: Int)
@@ -31,39 +35,39 @@ object CsvImportExport {
     }
 
     suspend fun import(input: InputStream, dao: UWAPODao): ImportResult {
-        val rows = parse(input.bufferedReader(Charsets.UTF_8).readText())
+        val rows = parseInput(input)
         if (rows.isEmpty()) return ImportResult(0, 0, 0)
         val header = rows.first().map { it.trim().removePrefix("\uFEFF").lowercase(Locale.ROOT) }
         fun index(vararg names: String): Int = header.indexOfFirst { it in names }
-        val iNo = index("member_no", "member number", "membership number")
-        val iName = index("full_name", "name", "member name")
-        if (iNo < 0 || iName < 0) throw IllegalArgumentException("CSV must contain member_no and full_name columns.")
-        val iPhone = index("phone", "phone_number")
-        val iJoin = index("join_date", "joined_at")
+        val iNo = index("member_no", "member number", "membership number", "member_id", "member id", "no", "no.")
+        val iName = index("full_name", "name", "member name", "full name")
+        if (iNo < 0 || iName < 0) throw IllegalArgumentException("File must contain member_no and full_name columns.")
+        val iPhone = index("phone", "phone_number", "phone number", "mobile")
+        val iJoin = index("join_date", "joined_at", "join date", "date joined")
         val iStatus = index("status")
         val iYear = index("period_year", "year")
         val iMonth = index("period_month", "month")
-        val iAmount = index("amount_paid_tzs", "amount", "paid")
-        val iPaidAt = index("paid_at", "payment_date")
-        val iMethod = index("payment_method", "method")
-        val iReceipt = index("receipt_reference", "receipt_no", "receipt")
+        val iAmount = index("amount_paid_tzs", "amount", "paid", "amount paid", "amount_paid")
+        val iPaidAt = index("paid_at", "payment_date", "paid date", "date")
+        val iMethod = index("payment_method", "method", "payment method")
+        val iReceipt = index("receipt_reference", "receipt_no", "receipt", "receipt no")
         var membersAdded = 0
         var paymentsAdded = 0
         var skipped = 0
         rows.drop(1).forEach { row ->
             fun value(i: Int) = if (i >= 0 && i < row.size) row[i].trim() else ""
-            val memberNo = value(iNo)
+            val memberNo = cleanStr(value(iNo))
             val fullName = value(iName)
             if (memberNo.isBlank() || fullName.isBlank()) { skipped++; return@forEach }
             val joinDate = parseDate(value(iJoin)) ?: LocalDate.now()
             val memberId = UUID.nameUUIDFromBytes("UWAPO-MEMBER:$memberNo".toByteArray(Charsets.UTF_8)).toString()
-            val member = MemberEntity(memberId, memberNo, fullName, value(iPhone), joinDate.atStartOfDay(ZoneId.of("Africa/Dar_es_Salaam")).toInstant().toEpochMilli(), value(iStatus).ifBlank { "active" }.lowercase(), "pending")
+            val member = MemberEntity(memberId, memberNo, fullName, cleanStr(value(iPhone)), joinDate.atStartOfDay(ZoneId.of("Africa/Dar_es_Salaam")).toInstant().toEpochMilli(), value(iStatus).ifBlank { "active" }.lowercase(), "pending")
             val inserted = dao.insertMemberIgnore(member)
             if (inserted != -1L) membersAdded++
             val actualMember = dao.getMemberByNumber(memberNo) ?: run { skipped++; return@forEach }
-            val amount = value(iAmount).replace(",", "").toLongOrNull() ?: 0L
-            val year = value(iYear).toIntOrNull()
-            val month = value(iMonth).toIntOrNull()
+            val amount = value(iAmount).replace(",", "").replace("TZS", "", ignoreCase = true).trim().let { it.toDoubleOrNull()?.toLong() ?: it.toLongOrNull() } ?: 0L
+            val year = cleanStr(value(iYear)).toIntOrNull()
+            val month = cleanStr(value(iMonth)).toIntOrNull()
             if (amount > 0 && year != null && year in 2000..2100 && month != null && month in 1..12) {
                 val paidDate = parseDate(value(iPaidAt)) ?: LocalDate.of(year, month, 1)
                 val method = value(iMethod).ifBlank { "cash" }.lowercase().replace(' ', '_')
@@ -80,13 +84,52 @@ object CsvImportExport {
         return ImportResult(membersAdded, paymentsAdded, skipped)
     }
 
+    private fun cleanStr(value: String): String {
+        val trimmed = value.trim()
+        return if (trimmed.endsWith(".0") && trimmed.substringBefore(".0").all { it.isDigit() }) {
+            trimmed.substringBefore(".0")
+        } else trimmed
+    }
+
     private fun parseDate(value: String): LocalDate? = try {
-        if (value.isBlank()) null else LocalDate.parse(value.take(10), DateTimeFormatter.ISO_LOCAL_DATE)
+        val trimmed = value.trim()
+        if (trimmed.isBlank()) null
+        else {
+            val num = trimmed.toDoubleOrNull()
+            if (num != null && num > 30000 && num < 100000) {
+                val days = num.toLong()
+                val offset = if (days > 60) 0L else 1L
+                LocalDate.of(1899, 12, 30).plusDays(days - offset)
+            } else {
+                val s = trimmed.take(10)
+                try { LocalDate.parse(s, DateTimeFormatter.ISO_LOCAL_DATE) }
+                catch (_: Exception) {
+                    try { LocalDate.parse(s, DateTimeFormatter.ofPattern("dd/MM/yyyy")) }
+                    catch (_: Exception) {
+                        try { LocalDate.parse(s, DateTimeFormatter.ofPattern("yyyy/MM/dd")) }
+                        catch (_: Exception) {
+                            try { LocalDate.parse(s, DateTimeFormatter.ofPattern("dd-MM-yyyy")) }
+                            catch (_: Exception) { null }
+                        }
+                    }
+                }
+            }
+        }
     } catch (_: Exception) { null }
 
     private fun csv(value: String): String = "\"" + value.replace("\"", "\"\"") + "\""
 
-    private fun parse(text: String): List<List<String>> {
+    private fun parseInput(input: InputStream): List<List<String>> {
+        val bytes = input.readBytes()
+        val isZip = bytes.size >= 4 && bytes[0] == 0x50.toByte() && bytes[1] == 0x4B.toByte() && bytes[2] == 0x03.toByte() && bytes[3] == 0x04.toByte()
+        return if (isZip) {
+            parseXlsx(bytes)
+        } else {
+            parseCsv(ByteArrayInputStream(bytes).bufferedReader(Charsets.UTF_8).readText())
+        }
+    }
+
+    private fun parseCsv(text: String): List<List<String>> {
         val result = mutableListOf<List<String>>()
         var row = mutableListOf<String>()
         val cell = StringBuilder()
@@ -111,5 +154,118 @@ object CsvImportExport {
         if (cell.isNotEmpty() || row.isNotEmpty()) { row.add(cell.toString()); if (row.any { it.isNotBlank() }) result.add(row) }
         if (quoted) throw IllegalArgumentException("CSV has an unclosed quoted field.")
         return result
+    }
+
+    private fun parseXlsx(bytes: ByteArray): List<List<String>> {
+        var sharedStrings = emptyList<String>()
+        try {
+            ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
+                var entry = zip.nextEntry
+                while (entry != null) {
+                    if (entry.name.lowercase(Locale.ROOT).endsWith("xl/sharedstrings.xml")) {
+                        val entryBytes = zip.readBytes()
+                        sharedStrings = parseSharedStrings(ByteArrayInputStream(entryBytes))
+                        break
+                    }
+                    entry = zip.nextEntry
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        var rows = emptyList<List<String>>()
+        try {
+            ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
+                var entry = zip.nextEntry
+                while (entry != null) {
+                    val name = entry.name.lowercase(Locale.ROOT)
+                    if (name.contains("xl/worksheets/sheet") && name.endsWith(".xml")) {
+                        val entryBytes = zip.readBytes()
+                        rows = parseSheet(ByteArrayInputStream(entryBytes), sharedStrings)
+                        if (rows.isNotEmpty()) break
+                    }
+                    entry = zip.nextEntry
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return rows
+    }
+
+    private fun parseSharedStrings(input: InputStream): List<String> {
+        val strings = mutableListOf<String>()
+        val dbf = DocumentBuilderFactory.newInstance()
+        dbf.isNamespaceAware = false
+        val doc = dbf.newDocumentBuilder().parse(input)
+        val siList = doc.getElementsByTagName("si")
+        for (i in 0 until siList.length) {
+            val si = siList.item(i) as Element
+            val tList = si.getElementsByTagName("t")
+            val sb = StringBuilder()
+            for (j in 0 until tList.length) {
+                sb.append(tList.item(j).textContent)
+            }
+            strings.add(sb.toString())
+        }
+        return strings
+    }
+
+    private fun parseSheet(input: InputStream, sharedStrings: List<String>): List<List<String>> {
+        val rows = mutableListOf<List<String>>()
+        val dbf = DocumentBuilderFactory.newInstance()
+        dbf.isNamespaceAware = false
+        val doc = dbf.newDocumentBuilder().parse(input)
+        val rowList = doc.getElementsByTagName("row")
+        for (i in 0 until rowList.length) {
+            val rowElem = rowList.item(i) as Element
+            val cList = rowElem.getElementsByTagName("c")
+            val currentRow = mutableMapOf<Int, String>()
+            var autoCol = 0
+            for (j in 0 until cList.length) {
+                val cElem = cList.item(j) as Element
+                val ref = cElem.getAttribute("r")
+                val type = cElem.getAttribute("t")
+                val vNodes = cElem.getElementsByTagName("v")
+                val tNodes = cElem.getElementsByTagName("t")
+                val rawVal = if (vNodes.length > 0) vNodes.item(0).textContent else if (tNodes.length > 0) tNodes.item(0).textContent else ""
+                val cellVal = when (type) {
+                    "s" -> {
+                        val idx = rawVal.toIntOrNull()
+                        if (idx != null && idx in sharedStrings.indices) sharedStrings[idx] else rawVal
+                    }
+                    "b" -> if (rawVal == "1") "TRUE" else "FALSE"
+                    else -> rawVal
+                }
+                val colIndex = getColIndexFromRef(ref).let { if (it >= 0) it else autoCol }
+                autoCol = colIndex + 1
+                currentRow[colIndex] = cellVal
+            }
+            if (currentRow.isNotEmpty()) {
+                val maxCol = currentRow.keys.maxOrNull() ?: -1
+                if (maxCol >= 0) {
+                    val list = List(maxCol + 1) { col -> currentRow[col] ?: "" }
+                    if (list.any { it.isNotBlank() }) {
+                        rows.add(list)
+                    }
+                }
+            }
+        }
+        return rows
+    }
+
+    private fun getColIndexFromRef(ref: String): Int {
+        if (ref.isBlank()) return -1
+        var colStr = ""
+        for (ch in ref) {
+            if (ch.isLetter()) colStr += ch else break
+        }
+        if (colStr.isBlank()) return -1
+        var index = 0
+        for (ch in colStr.uppercase(Locale.ROOT)) {
+            index = index * 26 + (ch - 'A' + 1)
+        }
+        return index - 1
     }
 }
