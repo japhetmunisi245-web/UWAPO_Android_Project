@@ -47,3 +47,13 @@ Import the reviewed CSV register from the app. Verify all 57 names, month amount
 - Member statements now paginate through all payment records instead of stopping after 25 rows. Long arrears lists paginate instead of being silently limited to 15 names.
 - “Net movement” means collections less included expenses. It is **not** a closing cash balance because the report does not capture a verified opening balance. Reconcile it against cashbook, bank, and mobile-money records before committee approval.
 - Expected contribution estimates assume TZS 10,000 per active member per month (12 months for the annual view). Confirm this against the club's approved rules before relying on arrears estimates.
+
+
+## Build and test the report upgrade
+1. Open the repository in Android Studio with JDK 17 and Android SDK 35 installed.
+2. Sync the Gradle project.
+3. Run **Build → Make Project** and then **Build → Build Bundle(s) / APK(s) → Build APK(s)**.
+4. Run **Run → Edit Configurations** and launch the app on an emulator/device with sample members, payments across multiple months, and both paid and pending expenses.
+5. In Reports, switch between Monthly and Annual. Verify monthly totals use contribution month/year, annual totals use contribution year, and only paid/approved expenses are included.
+6. Generate both financial PDFs and a member statement. Confirm headers/page numbers appear on every page and that statements with more than 25 payments and arrears lists with more than 15 members retain all rows.
+7. Run **Build → Select Build Variant → debug**, then **Run → Run 'app'**. If a Gradle installation is available in a terminal, use `gradle testDebugUnitTest` and `gradle assembleDebug`; this repository currently does not include a Gradle wrapper.
