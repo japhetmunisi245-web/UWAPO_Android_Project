@@ -40,6 +40,10 @@ android {
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
 }
 
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
     implementation(composeBom)
@@ -57,7 +61,11 @@ dependencies {
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")
+    androidTestImplementation("androidx.room:room-testing:2.6.1")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    implementation("androidx.biometric:biometric:1.1.0")
+    implementation("androidx.documentfile:documentfile:1.0.1")
+    implementation("net.zetetic:android-database-sqlcipher:4.5.4")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.work:work-runtime-ktx:2.9.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")

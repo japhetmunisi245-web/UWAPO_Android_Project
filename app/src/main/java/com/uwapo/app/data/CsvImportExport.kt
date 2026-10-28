@@ -14,6 +14,21 @@ import javax.xml.parsers.DocumentBuilderFactory
 object CsvImportExport {
     data class ImportResult(val membersAdded: Int, val paymentsAdded: Int, val rowsSkipped: Int)
 
+    private val MONTH_MAP = mapOf(
+        "january" to 1, "jan" to 1, "januari" to 1,
+        "february" to 2, "feb" to 2, "februari" to 2,
+        "march" to 3, "mar" to 3, "machi" to 3,
+        "april" to 4, "apr" to 4, "aprili" to 4,
+        "may" to 5, "mei" to 5,
+        "june" to 6, "jun" to 6, "juni" to 6,
+        "july" to 7, "jul" to 7, "julai" to 7,
+        "august" to 8, "aug" to 8, "agosti" to 8,
+        "september" to 9, "sept" to 9, "sep" to 9, "septemba" to 9,
+        "october" to 10, "oct" to 10, "oktoba" to 10,
+        "november" to 11, "nov" to 11, "novemba" to 11,
+        "december" to 12, "dec" to 12, "desemba" to 12
+    )
+
     fun export(members: List<MemberEntity>, payments: List<PaymentEntity>): String {
         val header = listOf("member_no", "full_name", "phone", "join_date", "status", "period_year", "period_month", "amount_paid_tzs", "paid_at", "payment_method", "receipt_reference", "source_note")
         val memberMap = members.associateBy { it.id }
@@ -34,14 +49,102 @@ object CsvImportExport {
         return lines.joinToString("\r\n") + "\r\n"
     }
 
-    suspend fun import(input: InputStream, dao: UWAPODao): ImportResult {
-        val rows = parseInput(input)
+    suspend fun import(input: InputStream, dao: UWAPODao, targetStartYear: Int? = null): ImportResult {
+        val sheets = parseInputSheets(input)
+        if (sheets.isEmpty() || sheets.all { it.isEmpty() }) return ImportResult(0, 0, 0)
+
+        val isMatrix = sheets.any { sheetHasMatrixHeader(it) }
+        return if (isMatrix) {
+            importMatrixLedger(sheets, dao, targetStartYear)
+        } else {
+            importStandardRows(sheets.flatten(), dao, targetStartYear)
+        }
+    }
+
+    private fun sheetHasMatrixHeader(sheet: List<List<String>>): Boolean {
+        for (row in sheet.take(5)) {
+            var monthCount = 0
+            for (cell in row) {
+                if (MONTH_MAP.containsKey(cell.trim().lowercase(Locale.ROOT))) {
+                    monthCount++
+                }
+            }
+            if (monthCount >= 2) return true
+        }
+        return false
+    }
+
+    private suspend fun importMatrixLedger(sheets: List<List<List<String>>>, dao: UWAPODao, targetStartYear: Int? = null): ImportResult {
+        val year = targetStartYear ?: detectYear(sheets)
+        var membersAdded = 0
+        var paymentsAdded = 0
+        var skipped = 0
+
+        for (sheet in sheets) {
+            var headerRowIndex = -1
+            var monthCols = mapOf<Int, Int>()
+
+            for ((rIdx, row) in sheet.take(5).withIndex()) {
+                val detected = mutableMapOf<Int, Int>()
+                for ((cIdx, cell) in row.withIndex()) {
+                    val m = MONTH_MAP[cell.trim().lowercase(Locale.ROOT)]
+                    if (m != null) detected[cIdx] = m
+                }
+                if (detected.size >= 2) {
+                    headerRowIndex = rIdx
+                    monthCols = detected
+                    break
+                }
+            }
+
+            if (headerRowIndex < 0) continue
+
+            for (row in sheet.drop(headerRowIndex + 1)) {
+                val rawCell = row.getOrNull(0)?.trim() ?: ""
+                val (num, name) = parseMemberCell(rawCell)
+                if (name.isBlank() || name.uppercase(Locale.ROOT) in listOf("JINA", "TOTAL", "JUMLA", "ADA")) {
+                    skipped++
+                    continue
+                }
+
+                val memberNo = num.ifBlank { name.replace(" ", "_").take(15) }
+                val memberId = UUID.nameUUIDFromBytes("UWAPO-MEMBER:$memberNo".toByteArray(Charsets.UTF_8)).toString()
+                val joinDate = LocalDate.of(year, 7, 1)
+                val member = MemberEntity(memberId, memberNo, name, "", joinDate.atStartOfDay(ZoneId.of("Africa/Dar_es_Salaam")).toInstant().toEpochMilli(), "active", "pending")
+                
+                val inserted = dao.insertMemberIgnore(member)
+                if (inserted != -1L) membersAdded++
+                val actualMember = dao.getMemberByNumber(memberNo) ?: dao.getMember(memberId)
+                if (actualMember == null) { skipped++; continue }
+
+                for ((cIdx, monthNum) in monthCols) {
+                    val amtStr = row.getOrNull(cIdx)?.replace(",", "")?.trim() ?: ""
+                    val amount = amtStr.toDoubleOrNull()?.toLong() ?: 0L
+                    if (amount > 0) {
+                        val paidDate = LocalDate.of(year, monthNum, 1)
+                        val receipt = "IMPORT-$memberNo-$year-${monthNum.toString().padStart(2, '0')}"
+                        val key = "$memberNo|$year|$monthNum|$amount|$paidDate|$receipt"
+                        val paymentId = UUID.nameUUIDFromBytes("UWAPO-PAYMENT:$key".toByteArray(Charsets.UTF_8)).toString()
+                        val payment = PaymentEntity(paymentId, actualMember.id, amount, year, monthNum,
+                            paidDate.atStartOfDay(ZoneId.of("Africa/Dar_es_Salaam")).toInstant().toEpochMilli(),
+                            "cash", receipt, paymentId, "pending")
+                        if (dao.insertPaymentIgnore(payment) != -1L) paymentsAdded++
+                    }
+                }
+            }
+        }
+        return ImportResult(membersAdded, paymentsAdded, skipped)
+    }
+
+    private suspend fun importStandardRows(rows: List<List<String>>, dao: UWAPODao, targetStartYear: Int? = null): ImportResult {
         if (rows.isEmpty()) return ImportResult(0, 0, 0)
         val header = rows.first().map { it.trim().removePrefix("\uFEFF").lowercase(Locale.ROOT) }
         fun index(vararg names: String): Int = header.indexOfFirst { it in names }
         val iNo = index("member_no", "member number", "membership number", "member_id", "member id", "no", "no.")
-        val iName = index("full_name", "name", "member name", "full name")
-        if (iNo < 0 || iName < 0) throw IllegalArgumentException("File must contain member_no and full_name columns.")
+        var iName = index("full_name", "name", "member name", "full name", "jina")
+        if (iName < 0 && iNo >= 0) iName = iNo
+        if (iNo < 0 && iName < 0) throw IllegalArgumentException("File must contain member_no or full_name columns.")
+
         val iPhone = index("phone", "phone_number", "phone number", "mobile")
         val iJoin = index("join_date", "joined_at", "join date", "date joined")
         val iStatus = index("status")
@@ -51,28 +154,37 @@ object CsvImportExport {
         val iPaidAt = index("paid_at", "payment_date", "paid date", "date")
         val iMethod = index("payment_method", "method", "payment method")
         val iReceipt = index("receipt_reference", "receipt_no", "receipt", "receipt no")
+
         var membersAdded = 0
         var paymentsAdded = 0
         var skipped = 0
+
         rows.drop(1).forEach { row ->
             fun value(i: Int) = if (i >= 0 && i < row.size) row[i].trim() else ""
-            val memberNo = cleanStr(value(iNo))
-            val fullName = value(iName)
-            if (memberNo.isBlank() || fullName.isBlank()) { skipped++; return@forEach }
-            val joinDate = parseDate(value(iJoin)) ?: LocalDate.now()
-            val memberId = UUID.nameUUIDFromBytes("UWAPO-MEMBER:$memberNo".toByteArray(Charsets.UTF_8)).toString()
-            val member = MemberEntity(memberId, memberNo, fullName, cleanStr(value(iPhone)), joinDate.atStartOfDay(ZoneId.of("Africa/Dar_es_Salaam")).toInstant().toEpochMilli(), value(iStatus).ifBlank { "active" }.lowercase(), "pending")
+            val rawName = value(iName)
+            val rawNo = value(iNo)
+            val (numFromCell, nameFromCell) = parseMemberCell(if (rawName.isNotBlank()) rawName else rawNo)
+            val memberNo = cleanStr(if (rawNo.isNotBlank()) rawNo else numFromCell)
+            val fullName = if (rawName.isNotBlank() && iName != iNo) rawName else nameFromCell
+
+            if (memberNo.isBlank() && fullName.isBlank()) { skipped++; return@forEach }
+            val actualNo = memberNo.ifBlank { fullName.replace(" ", "_").take(15) }
+            val defaultJoinYear = targetStartYear ?: LocalDate.now().year
+            val joinDate = parseDate(value(iJoin)) ?: LocalDate.of(defaultJoinYear, 7, 1)
+            val memberId = UUID.nameUUIDFromBytes("UWAPO-MEMBER:$actualNo".toByteArray(Charsets.UTF_8)).toString()
+            val member = MemberEntity(memberId, actualNo, fullName.ifBlank { actualNo }, cleanStr(value(iPhone)), joinDate.atStartOfDay(ZoneId.of("Africa/Dar_es_Salaam")).toInstant().toEpochMilli(), value(iStatus).ifBlank { "active" }.lowercase(), "pending")
             val inserted = dao.insertMemberIgnore(member)
             if (inserted != -1L) membersAdded++
-            val actualMember = dao.getMemberByNumber(memberNo) ?: run { skipped++; return@forEach }
+            val actualMember = dao.getMemberByNumber(actualNo) ?: dao.getMember(memberId) ?: run { skipped++; return@forEach }
+
             val amount = value(iAmount).replace(",", "").replace("TZS", "", ignoreCase = true).trim().let { it.toDoubleOrNull()?.toLong() ?: it.toLongOrNull() } ?: 0L
-            val year = cleanStr(value(iYear)).toIntOrNull()
+            val year = cleanStr(value(iYear)).toIntOrNull() ?: targetStartYear
             val month = cleanStr(value(iMonth)).toIntOrNull()
             if (amount > 0 && year != null && year in 2000..2100 && month != null && month in 1..12) {
                 val paidDate = parseDate(value(iPaidAt)) ?: LocalDate.of(year, month, 1)
                 val method = value(iMethod).ifBlank { "cash" }.lowercase().replace(' ', '_')
-                val receipt = value(iReceipt).ifBlank { "IMPORT-${memberNo}-${year}-${month.toString().padStart(2,'0')}" }
-                val key = "$memberNo|$year|$month|$amount|$paidDate|$receipt"
+                val receipt = value(iReceipt).ifBlank { "IMPORT-$actualNo-$year-${month.toString().padStart(2,'0')}" }
+                val key = "$actualNo|$year|$month|$amount|$paidDate|$receipt"
                 val paymentId = UUID.nameUUIDFromBytes("UWAPO-PAYMENT:$key".toByteArray(Charsets.UTF_8)).toString()
                 val payment = PaymentEntity(paymentId, actualMember.id, amount, year, month,
                     paidDate.atStartOfDay(ZoneId.of("Africa/Dar_es_Salaam")).toInstant().toEpochMilli(),
@@ -82,6 +194,45 @@ object CsvImportExport {
             }
         }
         return ImportResult(membersAdded, paymentsAdded, skipped)
+    }
+
+    private fun detectYear(sheets: List<List<List<String>>>): Int {
+        val yearRegex = Regex("""\b(20\d\d)\b""")
+        for (sheet in sheets) {
+            for (row in sheet.take(5)) {
+                for (cell in row) {
+                    val m = yearRegex.find(cell)
+                    if (m != null) {
+                        val y = m.groupValues[1].toIntOrNull()
+                        if (y != null && y in 2000..2100) return y
+                    }
+                }
+            }
+        }
+        return LocalDate.now().year
+    }
+
+    private fun parseMemberCell(raw: String): Pair<String, String> {
+        val clean = raw.replace("\n", " ").replace("\r", " ").trim()
+        if (clean.isBlank()) return Pair("", "")
+        val upper = clean.uppercase(Locale.ROOT)
+        if (upper == "TOTAL" || upper == "JUMLA" || upper == "JINA" || upper == "ADA") return Pair("", "")
+
+        var i = 0
+        while (i < clean.length && clean[i].isDigit()) {
+            i++
+        }
+        if (i > 0) {
+            val num = clean.substring(0, i)
+            var rest = clean.substring(i)
+            while (rest.startsWith(".") || rest.startsWith(" ") || rest.startsWith("-")) {
+                rest = rest.substring(1).trim()
+            }
+            if (rest.isNotBlank()) {
+                return Pair(num, rest)
+            }
+        }
+        return Pair("", clean)
     }
 
     private fun cleanStr(value: String): String {
@@ -119,13 +270,13 @@ object CsvImportExport {
 
     private fun csv(value: String): String = "\"" + value.replace("\"", "\"\"") + "\""
 
-    private fun parseInput(input: InputStream): List<List<String>> {
+    private fun parseInputSheets(input: InputStream): List<List<List<String>>> {
         val bytes = input.readBytes()
         val isZip = bytes.size >= 4 && bytes[0] == 0x50.toByte() && bytes[1] == 0x4B.toByte() && bytes[2] == 0x03.toByte() && bytes[3] == 0x04.toByte()
         return if (isZip) {
-            parseXlsx(bytes)
+            parseXlsxSheets(bytes)
         } else {
-            parseCsv(ByteArrayInputStream(bytes).bufferedReader(Charsets.UTF_8).readText())
+            listOf(parseCsv(ByteArrayInputStream(bytes).bufferedReader(Charsets.UTF_8).readText()))
         }
     }
 
@@ -156,7 +307,7 @@ object CsvImportExport {
         return result
     }
 
-    private fun parseXlsx(bytes: ByteArray): List<List<String>> {
+    private fun parseXlsxSheets(bytes: ByteArray): List<List<List<String>>> {
         var sharedStrings = emptyList<String>()
         try {
             ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
@@ -174,7 +325,7 @@ object CsvImportExport {
             e.printStackTrace()
         }
 
-        var rows = emptyList<List<String>>()
+        val sheets = mutableListOf<List<List<String>>>()
         try {
             ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
                 var entry = zip.nextEntry
@@ -182,8 +333,10 @@ object CsvImportExport {
                     val name = entry.name.lowercase(Locale.ROOT)
                     if (name.contains("xl/worksheets/sheet") && name.endsWith(".xml")) {
                         val entryBytes = zip.readBytes()
-                        rows = parseSheet(ByteArrayInputStream(entryBytes), sharedStrings)
-                        if (rows.isNotEmpty()) break
+                        val rows = parseSheet(ByteArrayInputStream(entryBytes), sharedStrings)
+                        if (rows.isNotEmpty()) {
+                            sheets.add(rows)
+                        }
                     }
                     entry = zip.nextEntry
                 }
@@ -191,7 +344,7 @@ object CsvImportExport {
         } catch (e: Exception) {
             e.printStackTrace()
         }
-        return rows
+        return sheets
     }
 
     private fun parseSharedStrings(input: InputStream): List<String> {

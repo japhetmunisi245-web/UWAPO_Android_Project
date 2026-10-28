@@ -10,6 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -35,10 +36,12 @@ fun ExpenseDetailDialog(
     expense: ExpenseEntity,
     onDismiss: () -> Unit,
     onUpdateStatus: (String) -> Unit,
-    onAttachReceiptPhoto: (String) -> Unit
+    onAttachReceiptPhoto: (String) -> Unit,
+    onDeleteExpense: (ExpenseEntity) -> Unit = {}
 ) {
     val context = LocalContext.current
     var imagePath by remember { mutableStateOf(expense.receiptImagePath) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
 
     val pickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri != null) {
@@ -59,12 +62,17 @@ fun ExpenseDetailDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(expense.category, fontWeight = FontWeight.Bold)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(expense.category, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                IconButton(onClick = { showDeleteConfirm = true }) {
+                    Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.btn_delete_expense), tint = MaterialTheme.colorScheme.error)
+                }
+            }
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(expense.description, style = MaterialTheme.typography.bodyLarge)
-                Text("Amount: $moneyStr", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                Text("${stringResource(R.string.label_amount_tzs)}: $moneyStr", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
                 Text("Date: $dateStr · Status: ${expense.status.replace('_', ' ').uppercase()}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
                 Spacer(Modifier.height(4.dp))
@@ -116,6 +124,16 @@ fun ExpenseDetailDialog(
                         }
                     }
                 }
+
+                OutlinedButton(
+                    onClick = { showDeleteConfirm = true },
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Delete, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.btn_delete_expense))
+                }
             }
         },
         confirmButton = {
@@ -124,4 +142,28 @@ fun ExpenseDetailDialog(
             }
         }
     )
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text(stringResource(R.string.dialog_delete_expense_title)) },
+            text = { Text(stringResource(R.string.dialog_delete_expense_msg, expense.category, moneyStr)) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteConfirm = false
+                        onDeleteExpense(expense)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text(stringResource(R.string.btn_delete_expense))
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showDeleteConfirm = false }) {
+                    Text(stringResource(R.string.btn_cancel))
+                }
+            }
+        )
+    }
 }

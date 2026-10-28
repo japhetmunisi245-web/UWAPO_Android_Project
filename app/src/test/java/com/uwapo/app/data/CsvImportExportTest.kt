@@ -4,9 +4,11 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -42,9 +44,21 @@ class CsvImportExportTest {
         override suspend fun insertExpense(expense: ExpenseEntity) {}
         override suspend fun upsertExpense(expense: ExpenseEntity) {}
         override suspend fun updateMemberProfile(id: String, phone: String, status: String, notes: String) {}
+        override suspend fun deletePaymentsForMember(memberId: String) {
+            payments.removeAll { it.memberId == memberId }
+        }
+        override suspend fun deleteMemberOnly(id: String) {
+            members.remove(id)
+        }
+        override suspend fun deleteMember(memberId: String) {
+            deletePaymentsForMember(memberId)
+            deleteMemberOnly(memberId)
+        }
         override suspend fun setExpenseLocalStatus(id: String, status: String) {}
         override suspend fun setExpenseReceiptImage(id: String, imagePath: String) {}
         override suspend fun markPaymentReversed(id: String) {}
+        override suspend fun deletePayment(id: String) { payments.removeAll { it.id == id } }
+        override suspend fun deleteExpense(id: String) {}
         override fun observeMonthlyTotal(year: Int, month: Int): Flow<Long> = flowOf(0L)
         override fun observeYearlyTotal(year: Int): Flow<Long> = flowOf(0L)
         override fun observeActiveMemberCount(): Flow<Int> = flowOf(members.size)
@@ -69,17 +83,45 @@ class CsvImportExportTest {
     }
 
     @Test
-    fun testXlsxImport() = runBlocking {
+    fun testMemberDeletion() = runBlocking {
         val dao = FakeUWAPODao()
-        val xlsxBytes = createTestXlsxBytes()
+        val csv = "member_no,full_name,amount,year,month\r\nM101,Amina Salum,10000,2025,1\r\n"
+        CsvImportExport.import(ByteArrayInputStream(csv.toByteArray(Charsets.UTF_8)), dao)
+        val member = dao.getMemberByNumber("M101")!!
+        assertEquals(1, dao.members.size)
+        assertEquals(1, dao.payments.size)
+
+        dao.deleteMember(member.id)
+        assertNull(dao.getMemberByNumber("M101"))
+        assertEquals(0, dao.members.size)
+        assertEquals(0, dao.payments.size)
+    }
+
+    @Test
+    fun testXlsxStandardImport() = runBlocking {
+        val dao = FakeUWAPODao()
+        val xlsxBytes = createTestStandardXlsxBytes()
         val result = CsvImportExport.import(ByteArrayInputStream(xlsxBytes), dao)
-        println("XLSX result: $result, members in dao: ${dao.members.values.map { it.fullName }}")
         assertEquals(1, result.membersAdded)
         assertEquals(0, result.rowsSkipped)
         assertEquals("John Doe", dao.getMemberByNumber("M202")?.fullName)
     }
 
-    private fun createTestXlsxBytes(): ByteArray {
+    @Test
+    fun testRealMichangoFileImport() = runBlocking {
+        val file = File("C:\\Users\\JEFF\\OneDrive\\Desktop\\MICHANGO 2025  HII HAPA  FROM JAN TO DEC UWAPO   .xlsx")
+        if (file.exists()) {
+            val dao = FakeUWAPODao()
+            val result = CsvImportExport.import(file.inputStream(), dao)
+            assertEquals(61, result.membersAdded)
+            assertEquals(688, result.paymentsAdded)
+            assertEquals(61, dao.members.size)
+            assertEquals(688, dao.payments.size)
+            assertEquals("MAGDALENA S.MARUA", dao.getMemberByNumber("1")?.fullName)
+        }
+    }
+
+    private fun createTestStandardXlsxBytes(): ByteArray {
         val baos = ByteArrayOutputStream()
         ZipOutputStream(baos).use { zos ->
             val sharedStringsXml = """

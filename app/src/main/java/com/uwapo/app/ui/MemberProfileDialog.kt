@@ -5,6 +5,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Sms
@@ -33,13 +34,16 @@ fun MemberProfileDialog(
     member: MemberEntity,
     payments: List<PaymentEntity>,
     onDismiss: () -> Unit,
-    onUpdateProfile: (String, String, String) -> Unit
+    onUpdateProfile: (String, String, String) -> Unit,
+    onDeleteMember: (MemberEntity) -> Unit = {},
+    onDeletePayment: (PaymentEntity) -> Unit = {}
 ) {
     var isEditing by remember { mutableStateOf(false) }
     var phone by remember { mutableStateOf(member.phone) }
     var status by remember { mutableStateOf(member.status) }
     var notes by remember { mutableStateOf(member.notes) }
     var statusExpanded by remember { mutableStateOf(false) }
+    var showDeleteConfirmation by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
     val memberPayments = remember(payments, member.id) {
@@ -57,6 +61,9 @@ fun MemberProfileDialog(
                 Column(Modifier.weight(1f)) {
                     Text(member.fullName, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
                     Text("${member.memberNo} · ${stringResource(R.string.joined_date, joinDateStr)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                IconButton(onClick = { showDeleteConfirmation = true }) {
+                    Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.btn_delete_member), tint = MaterialTheme.colorScheme.error)
                 }
                 IconButton(onClick = { isEditing = !isEditing }) {
                     Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.edit_profile))
@@ -166,10 +173,12 @@ fun MemberProfileDialog(
                     }
                 }
 
-                Text("Payment History", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.payment_history), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
                 if (memberPayments.isEmpty()) {
-                    Text("No payment history for this member.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.no_payments_yet), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
+                    var paymentToDelete by remember { mutableStateOf<PaymentEntity?>(null) }
+
                     LazyColumn(
                         Modifier.heightIn(max = 180.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -182,9 +191,38 @@ fun MemberProfileDialog(
                                         Text(SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(p.paidAt)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                     Text("TZS ${NumberFormat.getIntegerInstance(Locale("en", "TZ")).format(p.amountTzs)}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                    IconButton(onClick = { paymentToDelete = p }) {
+                                        Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.btn_delete_payment), tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+                                    }
                                 }
                             }
                         }
+                    }
+
+                    paymentToDelete?.let { p ->
+                        val pAmtStr = "TZS " + NumberFormat.getIntegerInstance(Locale("en", "TZ")).format(p.amountTzs)
+                        AlertDialog(
+                            onDismissRequest = { paymentToDelete = null },
+                            title = { Text(stringResource(R.string.dialog_delete_payment_title)) },
+                            text = { Text(stringResource(R.string.dialog_delete_payment_msg, pAmtStr, p.receiptNo)) },
+                            confirmButton = {
+                                Button(
+                                    onClick = {
+                                        val target = p
+                                        paymentToDelete = null
+                                        onDeletePayment(target)
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                                ) {
+                                    Text(stringResource(R.string.btn_delete_payment))
+                                }
+                            },
+                            dismissButton = {
+                                OutlinedButton(onClick = { paymentToDelete = null }) {
+                                    Text(stringResource(R.string.btn_cancel))
+                                }
+                            }
+                        )
                     }
                 }
             }
@@ -195,4 +233,28 @@ fun MemberProfileDialog(
             }
         }
     )
+
+    if (showDeleteConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirmation = false },
+            title = { Text(stringResource(R.string.dialog_delete_member_title)) },
+            text = { Text(stringResource(R.string.dialog_delete_member_msg, member.fullName)) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteConfirmation = false
+                        onDeleteMember(member)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text(stringResource(R.string.btn_delete_member))
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showDeleteConfirmation = false }) {
+                    Text(stringResource(R.string.btn_cancel))
+                }
+            }
+        )
+    }
 }

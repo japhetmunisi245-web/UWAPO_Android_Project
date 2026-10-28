@@ -5,7 +5,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [MemberEntity::class, PaymentEntity::class, ExpenseEntity::class], version = 4, exportSchema = false)
+@Database(entities = [MemberEntity::class, PaymentEntity::class, ExpenseEntity::class], version = 4, exportSchema = true)
 abstract class UWAPODatabase : RoomDatabase() {
     abstract fun uwapoDao(): UWAPODao
     companion object {

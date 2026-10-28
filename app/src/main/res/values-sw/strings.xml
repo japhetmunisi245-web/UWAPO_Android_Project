@@ -38,6 +38,10 @@
     <string name="count_registered">%1$d wamesajiliwa</string>
     <string name="search_members_hint">Tafuta jina, namba, au simu</string>
     <string name="import_csv">Ingiza wanachama na malipo ya nyuma (CSV / XLSX)</string>
+    <string name="btn_delete_member">Futa Mwanachama</string>
+    <string name="dialog_delete_member_title">Futa Mwanachama</string>
+    <string name="dialog_delete_member_msg">Je, una uhakika unataka kumfuta %1$s? Malipo yote yanayohusiana na mwanachama huyu yatafutwa pia.</string>
+    <string name="toast_member_deleted">Mwanachama amefutwa.</string>
 
     <!-- Empty States -->
     <string name="no_matching_members">Hakuna mwanachama aliyepatikana</string>
@@ -174,4 +178,66 @@
     <string name="contributions_vs_expenses">Michango ikilinganishwa na Matumizi</string>
     <string name="filter_status">Chuja kwa Hali</string>
     <string name="all_statuses">Hali Zote</string>
+
+    <!-- Batch & Contribution Period Strings -->
+    <string name="batch_years_title">Batch za Miaka</string>
+    <string name="select_batch_year">Chagua Batch ya Mwaka</string>
+    <string name="select_contribution_period">Chagua Kipindi cha Michango</string>
+    <string name="term_1_title">Term 1: Januari – Juni</string>
+    <string name="term_2_title">Term 2: Julai – Desemba</string>
+    <string name="term_1_subtitle">Januari – Juni (%1$d)</string>
+    <string name="term_2_subtitle">Julai – Desemba (%1$d)</string>
+    <string name="required_amount">Kiasi Inachotakiwa</string>
+    <string name="amount_paid">Kiasi Kiliyolipwa</string>
+    <string name="balance">Salio / Deni</string>
+    <string name="payment_history">Historia ya Malipo</string>
+    <string name="status_paid">Amelipa</string>
+    <string name="status_partial">Amelipa Kiasi</string>
+    <string name="status_pending">Hajalipa</string>
+    <string name="batch_year_label">Batch %1$s</string>
+    <string name="all_members_tab">Wanachama Wote</string>
+    <string name="batches_tab">Batch na Vipindi</string>
+    <string name="back_to_batches">← Rudi Kwenye Batch</string>
+    <string name="back_to_periods">← Rudi Kwenye Vipindi</string>
+    <string name="no_payments_period">Hakuna kumbukumbu za malipo kwa kipindi hiki</string>
+    <string name="term_months_jan_jun">Miezi: Jan, Feb, Mar, Apr, Mei, Jun</string>
+    <string name="term_months_jul_dec">Miezi: Jul, Agos, Sep, Okt, Nov, Des</string>
+    <string name="record_payment_for">Weka Malipo ya %1$s</string>
+    <string name="add_custom_batch">Ongeza Batch ya Mwaka</string>
+    <string name="custom_batch_dialog_title">Ongeza Batch ya Mwaka</string>
+    <string name="start_year_label">Mwaka wa Kuanza (mf. 2024)</string>
+    <string name="end_year_label">Mwaka wa Kumaliza (mf. 2025)</string>
+    <string name="btn_add_batch">Ongeza Batch</string>
+    <string name="term_summary_info">Muhtasari wa Kipindi · %1$s</string>
+    <string name="total_collected_period">Jumla Yote: %1$s</string>
+    <string name="members_summary_counts">%1$d Wamelipa · %2$d Kiasi · %3$d Hawajalipa</string>
+
+    <!-- Batch Import Strings -->
+    <string name="import_batch_file">Ingiza Faili la Batch (.xls / .xlsx / .csv)</string>
+    <string name="import_batch_title">Ingiza Batch ya %1$s</string>
+    <string name="toast_batch_import_complete">Wameingizwa wanachama %1$d kwenye Batch %2$s (malipo %3$d yameongezwa, %4$d yamerukwa).</string>
+
+    <!-- Payment Deletion & Expense Deletion Strings -->
+    <string name="btn_delete_payment">Futa Malipo</string>
+    <string name="dialog_delete_payment_title">Futa Kumbukumbu ya Malipo?</string>
+    <string name="dialog_delete_payment_msg">Je, una uhakika unataka kufuta kabisa kumbukumbu hii ya malipo ya %1$s (%2$s)?</string>
+    <string name="toast_payment_deleted">Kumbukumbu ya malipo imefutwa kabisa.</string>
+
+    <string name="btn_delete_expense">Futa Matumizi</string>
+    <string name="dialog_delete_expense_title">Futa Matumizi?</string>
+    <string name="dialog_delete_expense_msg">Je, una uhakika unataka kufuta kumbukumbu hii ya matumizi (%1$s - %2$s)?</string>
+    <string name="toast_expense_deleted">Matumizi yamefutwa.</string>
+
+    <!-- Categorized Batch Payments -->
+    <string name="all_batches">Batch Zote</string>
+    <string name="filter_by_batch">Chuja kwa Batch</string>
+    <string name="batch_summary_header">%1$s · malipo %2$d</string>
+    <string name="no_payments_for_batch">Hakuna kumbukumbu za malipo zilizopatikana kwa %1$s.</string>
+
+    <!-- Detailed Reports -->
+    <string name="net_balance">Salio Kamili / Akiba</string>
+    <string name="total_collections">Jumla ya Makusanyo</string>
+    <string name="total_expenses">Jumla ya Matumizi</string>
+    <string name="batch_collections_summary">Muhtasari wa Makusanyo kwa Batch</string>
+    <string name="active_members_count">Wanachama Hai: %1$d</string>
 </resources>

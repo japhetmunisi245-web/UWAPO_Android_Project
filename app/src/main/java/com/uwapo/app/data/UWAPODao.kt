@@ -45,12 +45,25 @@ interface UWAPODao {
 
     @Query("UPDATE members SET phone = :phone, status = :status, notes = :notes WHERE id = :id")
     suspend fun updateMemberProfile(id: String, phone: String, status: String, notes: String)
+    @Query("DELETE FROM payments WHERE memberId = :memberId")
+    suspend fun deletePaymentsForMember(memberId: String)
+    @Query("DELETE FROM members WHERE id = :id")
+    suspend fun deleteMemberOnly(id: String)
+    @androidx.room.Transaction
+    suspend fun deleteMember(memberId: String) {
+        deletePaymentsForMember(memberId)
+        deleteMemberOnly(memberId)
+    }
     @Query("UPDATE expenses SET status = :status WHERE id = :id")
     suspend fun setExpenseLocalStatus(id: String, status: String)
     @Query("UPDATE expenses SET receiptImagePath = :imagePath WHERE id = :id")
     suspend fun setExpenseReceiptImage(id: String, imagePath: String)
     @Query("UPDATE payments SET syncStatus = 'reversed' WHERE id = :id")
     suspend fun markPaymentReversed(id: String)
+    @Query("DELETE FROM payments WHERE id = :id")
+    suspend fun deletePayment(id: String)
+    @Query("DELETE FROM expenses WHERE id = :id")
+    suspend fun deleteExpense(id: String)
 
     @Query("SELECT COALESCE(SUM(amountTzs), 0) FROM payments WHERE periodYear = :year AND periodMonth = :month AND syncStatus != 'reversed'")
     fun observeMonthlyTotal(year: Int, month: Int): Flow<Long>
