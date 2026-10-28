@@ -209,115 +209,123 @@ object PdfGenerator {
         expensesTotal: Long,
         memberCount: Int,
         defaulters: List<MemberEntity>,
-        batchBreakdown: Map<String, Long> = emptyMap()
+        batchBreakdown: Map<String, Long> = emptyMap(),
+        periodLabel: String = "Current reporting period",
+        periodCollectionsTzs: Long = yearlyTotal
     ): File {
         val document = PdfDocument()
-        val pageInfo = PdfDocument.PageInfo.Builder(595, 842, 1).create()
-        val page = document.startPage(pageInfo)
-        val canvas = page.canvas
         val paint = Paint().apply { isAntiAlias = true }
+        var pageNumber = 0
+        lateinit var page: PdfDocument.Page
+        lateinit var canvas: android.graphics.Canvas
+        var y = 0f
 
-        // Header Banner
-        paint.color = Color.parseColor("#17365D")
-        canvas.drawRect(0f, 0f, 595f, 100f, paint)
-
-        paint.color = Color.WHITE
-        paint.textSize = 22f
-        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        canvas.drawText("UWAPO MEMBERSHIP CLUB", 40f, 45f, paint)
-
-        paint.textSize = 14f
-        paint.typeface = Typeface.DEFAULT
-        canvas.drawText("Financial & Membership Report / Ripoti ya Fedha", 40f, 68f, paint)
-
-        val generatedDate = SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault()).format(Date())
-        paint.textSize = 10f
-        canvas.drawText("Generated / Tarehe: $generatedDate", 40f, 88f, paint)
-
-        // Summary Card Section
-        paint.color = Color.parseColor("#F2F4F7")
-        canvas.drawRoundRect(40f, 115f, 555f, 220f, 10f, 10f, paint)
-
-        paint.color = Color.parseColor("#17365D")
-        paint.textSize = 13f
-        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        canvas.drawText("FINANCIAL SUMMARY / MUHTASARI WA FEDHA", 55f, 138f, paint)
-
-        paint.color = Color.BLACK
-        paint.textSize = 12f
-        paint.typeface = Typeface.DEFAULT
-        canvas.drawText("Total Registered Members: $memberCount", 55f, 162f, paint)
-        canvas.drawText("Current Month Collected: ${money(monthTotal)}", 55f, 182f, paint)
-        canvas.drawText("Yearly Total Collections: ${money(yearlyTotal)}", 55f, 202f, paint)
-
-        canvas.drawText("Approved Expenses: ${money(expensesTotal)}", 320f, 162f, paint)
-        val net = yearlyTotal - expensesTotal
-        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        paint.color = if (net >= 0) Color.parseColor("#006400") else Color.RED
-        canvas.drawText("Net Reserve Balance: ${money(net)}", 320f, 182f, paint)
-
-        // Batch Breakdown Section Table
-        var y = 240f
-        if (batchBreakdown.isNotEmpty()) {
+        fun startPage() {
+            if (pageNumber > 0) document.finishPage(page)
+            pageNumber++
+            page = document.startPage(PdfDocument.PageInfo.Builder(595, 842, pageNumber).create())
+            canvas = page.canvas
             paint.color = Color.parseColor("#17365D")
-            canvas.drawRect(40f, y, 555f, y + 25f, paint)
+            canvas.drawRect(0f, 0f, 595f, 105f, paint)
+            paint.color = Color.WHITE
+            paint.textSize = 20f
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            canvas.drawText("UWAPO MEMBERSHIP CLUB", 40f, 37f, paint)
+            paint.textSize = 14f
+            canvas.drawText(reportTitle.take(62), 40f, 60f, paint)
+            paint.textSize = 10f
+            paint.typeface = Typeface.DEFAULT
+            val generated = SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault()).format(Date())
+            canvas.drawText("Period: $periodLabel", 40f, 80f, paint)
+            canvas.drawText("Generated: $generated", 40f, 95f, paint)
+            paint.color = Color.LTGRAY
+            canvas.drawLine(40f, 802f, 555f, 802f, paint)
+            paint.color = Color.GRAY
+            paint.textSize = 9f
+            canvas.drawText("UWAPO • Local records report • Amounts in TZS", 40f, 820f, paint)
+            canvas.drawText("Page $pageNumber", 505f, 820f, paint)
+            y = 128f
+        }
 
+        fun sectionHeader(title: String) {
+            if (y + 32f > 785f) startPage()
+            paint.color = Color.parseColor("#17365D")
+            canvas.drawRoundRect(40f, y, 555f, y + 26f, 4f, 4f, paint)
             paint.color = Color.WHITE
             paint.textSize = 11f
             paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            canvas.drawText("BATCH YEAR", 55f, y + 17f, paint)
-            canvas.drawText("TOTAL COLLECTED", 350f, y + 17f, paint)
-
-            y += 25f
-            paint.color = Color.BLACK
+            canvas.drawText(title.take(78), 52f, y + 17f, paint)
             paint.typeface = Typeface.DEFAULT
-            batchBreakdown.forEach { (batchLabel, collected) ->
-                y += 20f
-                canvas.drawText("Batch $batchLabel", 55f, y, paint)
-                canvas.drawText(money(collected), 350f, y, paint)
-                paint.color = Color.LTGRAY
-                canvas.drawLine(40f, y + 5f, 555f, y + 5f, paint)
-                paint.color = Color.BLACK
-            }
-            y += 15f
+            y += 34f
         }
 
-        // Defaulters List Section
-        y += 10f
-        paint.color = Color.parseColor("#17365D")
-        canvas.drawRect(40f, y, 555f, y + 25f, paint)
+        fun tableRow(left: String, right: String, rowHeight: Float = 22f) {
+            if (y + rowHeight > 785f) startPage()
+            paint.color = Color.BLACK
+            paint.textSize = 11f
+            paint.typeface = Typeface.DEFAULT
+            canvas.drawText(left.take(62), 52f, y + 14f, paint)
+            canvas.drawText(right.take(26), 365f, y + 14f, paint)
+            paint.color = Color.parseColor("#D8DEE8")
+            canvas.drawLine(48f, y + rowHeight, 547f, y + rowHeight, paint)
+            y += rowHeight
+        }
 
-        paint.color = Color.WHITE
-        paint.textSize = 11f
-        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        canvas.drawText("DEFAULTERS LIST / WENYE MADENI MWEZI HUU (${defaulters.size})", 50f, y + 17f, paint)
+        try {
+            startPage()
 
-        y += 25f
-        paint.color = Color.BLACK
-        paint.typeface = Typeface.DEFAULT
+        sectionHeader("EXECUTIVE SUMMARY / MUHTASARI")
+        tableRow("Reporting period", periodLabel)
+        tableRow("Registered members", memberCount.toString())
+        tableRow("Collections for selected period", money(periodCollectionsTzs))
+        tableRow("Collections recorded year-to-date", money(yearlyTotal))
+        tableRow("Approved / paid expenses for period", money(expensesTotal))
+        tableRow("Net movement (opening balance excluded)", money(periodCollectionsTzs - expensesTotal))
+        y += 12f
 
+        sectionHeader("BATCH COLLECTIONS / MICHANGO KWA BATCH")
+        if (batchBreakdown.isEmpty()) tableRow("No batch collection records for this report", "—")
+        else batchBreakdown.toSortedMap().forEach { (batchLabel, collected) -> tableRow("Batch $batchLabel", money(collected)) }
+        y += 12f
+
+        sectionHeader("CURRENT-MONTH ARREARS / WANACHAMA AMBAO HAWAJALIPA")
+        tableRow("Members outstanding for current month", defaulters.size.toString())
         if (defaulters.isEmpty()) {
-            y += 20f
-            canvas.drawText("All active members have paid for this month!", 50f, y, paint)
+            tableRow("All active members are recorded as paid this month", "—")
         } else {
-            defaulters.take(15).forEachIndexed { idx, m ->
-                y += 20f
-                canvas.drawText("${idx + 1}. ${m.fullName} (${m.memberNo}) - ${m.phone.ifBlank { "No Phone" }}", 50f, y, paint)
+            defaulters.forEachIndexed { index, member ->
+                if (y + 26f > 785f) {
+                    startPage()
+                    sectionHeader("CURRENT-MONTH ARREARS / CONTINUED")
+                }
+                paint.color = Color.BLACK
+                paint.textSize = 10f
+                canvas.drawText("${index + 1}. ${member.fullName} (${member.memberNo})".take(64), 52f, y + 12f, paint)
+                canvas.drawText(member.phone.ifBlank { "No phone recorded" }.take(30), 330f, y + 12f, paint)
+                paint.color = Color.parseColor("#D8DEE8")
+                canvas.drawLine(48f, y + 20f, 547f, y + 20f, paint)
+                y += 22f
             }
         }
-
-        // Footer
-        paint.color = Color.LTGRAY
-        canvas.drawLine(40f, 800f, 555f, 800f, paint)
-        paint.color = Color.GRAY
+        y += 18f
+        if (y + 70f > 785f) startPage()
+        sectionHeader("COMMITTEE REVIEW / UTHIBITISHO")
+        paint.color = Color.BLACK
         paint.textSize = 10f
-        canvas.drawText("UWAPO Management System - Official Financial Document", 150f, 815f, paint)
+        canvas.drawText("Prepared by: ______________________________", 50f, y + 12f, paint)
+        canvas.drawText("Reviewed by: ______________________________", 310f, y + 12f, paint)
+        y += 30f
+        canvas.drawText("Approved by: ______________________________", 50f, y + 12f, paint)
+        canvas.drawText("Date: ____________________", 365f, y + 12f, paint)
 
         document.finishPage(page)
-        val file = File(context.cacheDir, "report_${System.currentTimeMillis()}.pdf")
+        val safeName = reportTitle.lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]+"), "_").trim('_').take(40).ifBlank { "report" }
+        val file = File(context.cacheDir, "uwapo_${safeName}_${System.currentTimeMillis()}.pdf")
         FileOutputStream(file).use { out -> document.writeTo(out) }
-        document.close()
         return file
+        } finally {
+            document.close()
+        }
     }
 
     fun sharePdf(context: Context, file: File, chooserTitle: String = "Share PDF") {
