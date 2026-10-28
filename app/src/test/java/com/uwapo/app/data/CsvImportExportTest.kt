@@ -23,6 +23,7 @@ class CsvImportExportTest {
         override fun observeExpenses(): Flow<List<ExpenseEntity>> = flowOf(emptyList())
         override suspend fun getMember(id: String): MemberEntity? = members[id]
         override suspend fun getMemberByNumber(memberNo: String): MemberEntity? = members.values.find { it.memberNo == memberNo }
+        override suspend fun getAllMembersSync(): List<MemberEntity> = members.values.toList()
         override suspend fun getPaymentByRequestId(requestId: String): PaymentEntity? = payments.find { it.requestId == requestId }
         override fun observeMemberPayments(memberId: String): Flow<List<PaymentEntity>> = flowOf(payments.filter { it.memberId == memberId })
         override suspend fun getMemberPaymentsSync(memberId: String): List<PaymentEntity> = payments.filter { it.memberId == memberId }
@@ -64,12 +65,6 @@ class CsvImportExportTest {
         override fun observeActiveMemberCount(): Flow<Int> = flowOf(members.size)
         override fun observeLifetimeTotal(): Flow<Long> = flowOf(0L)
         override fun observePaidExpensesTotal(): Flow<Long> = flowOf(0L)
-        override suspend fun pendingMembers(): List<MemberEntity> = emptyList()
-        override suspend fun setMemberSyncStatus(id: String, syncStatus: String) {}
-        override suspend fun pendingPayments(): List<PaymentEntity> = emptyList()
-        override suspend fun setPaymentSyncStatus(id: String, syncStatus: String, receiptNo: String) {}
-        override suspend fun pendingExpenses(): List<ExpenseEntity> = emptyList()
-        override suspend fun setExpenseSyncStatus(id: String, syncStatus: String) {}
     }
 
     @Test

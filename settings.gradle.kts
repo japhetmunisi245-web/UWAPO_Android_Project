@@ -10,4 +10,4 @@ dependencyResolutionManagement {
     repositories { google(); mavenCentral() }
 }
 rootProject.name = "UWAPO"
-include(":app")
+include(":app", ":desktopApp")

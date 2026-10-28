@@ -74,8 +74,61 @@ object CsvImportExport {
         return false
     }
 
+    private fun normalizeMemberName(name: String): String {
+        return name.replace(".", " ")
+            .replace("-", " ")
+            .replace("_", " ")
+            .replace("\\s+".toRegex(), " ")
+            .trim()
+            .lowercase(Locale.ROOT)
+    }
+
+    private suspend fun findOrRegisterMember(
+        existingMembers: MutableList<MemberEntity>,
+        num: String,
+        fullName: String,
+        year: Int,
+        phone: String = "",
+        status: String = "active",
+        dao: UWAPODao
+    ): Pair<MemberEntity, Boolean> {
+        val normName = normalizeMemberName(fullName)
+        val matchedByName = if (normName.isNotBlank()) {
+            existingMembers.find { normalizeMemberName(it.fullName) == normName }
+        } else null
+
+        val matchedByNum = if (matchedByName == null && num.isNotBlank()) {
+            existingMembers.find { it.memberNo == num }
+        } else null
+
+        val matched = matchedByName ?: matchedByNum
+        if (matched != null) {
+            return Pair(matched, false)
+        }
+
+        val memberNo = num.ifBlank { fullName.replace(" ", "_").take(15) }
+        val memberId = UUID.nameUUIDFromBytes("UWAPO-MEMBER:$memberNo".toByteArray(Charsets.UTF_8)).toString()
+        val joinDate = LocalDate.of(year, 7, 1)
+        val newMember = MemberEntity(
+            id = memberId,
+            memberNo = memberNo,
+            fullName = fullName.ifBlank { memberNo },
+            phone = phone,
+            joinedAt = joinDate.atStartOfDay(ZoneId.of("Africa/Dar_es_Salaam")).toInstant().toEpochMilli(),
+            status = status,
+            syncStatus = "pending"
+        )
+
+        val inserted = dao.insertMemberIgnore(newMember)
+        val isAdded = inserted != -1L
+        val created = dao.getMemberByNumber(memberNo) ?: dao.getMember(memberId) ?: newMember
+        existingMembers.add(created)
+        return Pair(created, isAdded)
+    }
+
     private suspend fun importMatrixLedger(sheets: List<List<List<String>>>, dao: UWAPODao, targetStartYear: Int? = null): ImportResult {
         val year = targetStartYear ?: detectYear(sheets)
+        val existingMembers = dao.getAllMembersSync().toMutableList()
         var membersAdded = 0
         var paymentsAdded = 0
         var skipped = 0
@@ -107,16 +160,10 @@ object CsvImportExport {
                     continue
                 }
 
-                val memberNo = num.ifBlank { name.replace(" ", "_").take(15) }
-                val memberId = UUID.nameUUIDFromBytes("UWAPO-MEMBER:$memberNo".toByteArray(Charsets.UTF_8)).toString()
-                val joinDate = LocalDate.of(year, 7, 1)
-                val member = MemberEntity(memberId, memberNo, name, "", joinDate.atStartOfDay(ZoneId.of("Africa/Dar_es_Salaam")).toInstant().toEpochMilli(), "active", "pending")
-                
-                val inserted = dao.insertMemberIgnore(member)
-                if (inserted != -1L) membersAdded++
-                val actualMember = dao.getMemberByNumber(memberNo) ?: dao.getMember(memberId)
-                if (actualMember == null) { skipped++; continue }
+                val (actualMember, isNew) = findOrRegisterMember(existingMembers, num, name, year, dao = dao)
+                if (isNew) membersAdded++
 
+                val memberNo = actualMember.memberNo
                 for ((cIdx, monthNum) in monthCols) {
                     val amtStr = row.getOrNull(cIdx)?.replace(",", "")?.trim() ?: ""
                     val amount = amtStr.toDoubleOrNull()?.toLong() ?: 0L
@@ -159,6 +206,7 @@ object CsvImportExport {
         var paymentsAdded = 0
         var skipped = 0
 
+        val existingMembers = dao.getAllMembersSync().toMutableList()
         rows.drop(1).forEach { row ->
             fun value(i: Int) = if (i >= 0 && i < row.size) row[i].trim() else ""
             val rawName = value(iName)
@@ -168,15 +216,19 @@ object CsvImportExport {
             val fullName = if (rawName.isNotBlank() && iName != iNo) rawName else nameFromCell
 
             if (memberNo.isBlank() && fullName.isBlank()) { skipped++; return@forEach }
-            val actualNo = memberNo.ifBlank { fullName.replace(" ", "_").take(15) }
             val defaultJoinYear = targetStartYear ?: LocalDate.now().year
-            val joinDate = parseDate(value(iJoin)) ?: LocalDate.of(defaultJoinYear, 7, 1)
-            val memberId = UUID.nameUUIDFromBytes("UWAPO-MEMBER:$actualNo".toByteArray(Charsets.UTF_8)).toString()
-            val member = MemberEntity(memberId, actualNo, fullName.ifBlank { actualNo }, cleanStr(value(iPhone)), joinDate.atStartOfDay(ZoneId.of("Africa/Dar_es_Salaam")).toInstant().toEpochMilli(), value(iStatus).ifBlank { "active" }.lowercase(), "pending")
-            val inserted = dao.insertMemberIgnore(member)
-            if (inserted != -1L) membersAdded++
-            val actualMember = dao.getMemberByNumber(actualNo) ?: dao.getMember(memberId) ?: run { skipped++; return@forEach }
+            val (actualMember, isNew) = findOrRegisterMember(
+                existingMembers = existingMembers,
+                num = memberNo,
+                fullName = fullName.ifBlank { memberNo },
+                year = defaultJoinYear,
+                phone = cleanStr(value(iPhone)),
+                status = value(iStatus).ifBlank { "active" }.lowercase(),
+                dao = dao
+            )
+            if (isNew) membersAdded++
 
+            val actualNo = actualMember.memberNo
             val amount = value(iAmount).replace(",", "").replace("TZS", "", ignoreCase = true).trim().let { it.toDoubleOrNull()?.toLong() ?: it.toLongOrNull() } ?: 0L
             val year = cleanStr(value(iYear)).toIntOrNull() ?: targetStartYear
             val month = cleanStr(value(iMonth)).toIntOrNull()

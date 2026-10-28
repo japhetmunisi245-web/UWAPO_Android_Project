@@ -9,6 +9,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -42,6 +44,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.uwapo.app.R
 import com.uwapo.app.data.CsvImportExport
@@ -163,7 +166,7 @@ fun UWAPORoot(dao: UWAPODao) {
             try {
                 val result = withContext(Dispatchers.IO) {
                     context.contentResolver.openInputStream(uri)?.use { stream ->
-                        CsvImportExport.import(stream, dao, targetStartYear = targetBatch.startYear)
+                        CsvImportExport.import(stream, dao, targetStartYear = targetBatch.year)
                     } ?: throw IllegalStateException("Could not open the selected file.")
                 }
                 val msg = context.getString(
@@ -201,9 +204,19 @@ fun UWAPORoot(dao: UWAPODao) {
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text(stringResource(R.string.app_name), fontWeight = FontWeight.Bold)
-                        Text(stringResource(R.string.app_subtitle), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimary.copy(alpha = .8f))
+                    Column(verticalArrangement = Arrangement.Center) {
+                        Text(
+                            stringResource(R.string.app_name),
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Text(
+                            stringResource(R.string.app_subtitle),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = .8f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 },
                 actions = {
@@ -326,8 +339,11 @@ fun UWAPORoot(dao: UWAPODao) {
                 onDeleteExpense = { expenseToDelete = it }
             )
             Tab.REPORTS -> ReportsScreen(
-                Modifier.padding(padding), monthTotal, yearlyTotal, expensesTotal, members.size, activeCount, payments.size, defaulters, payments,
-                onExport = { exportLauncher.launch("uwapo-register-${System.currentTimeMillis()}.csv") }
+                modifier = Modifier.padding(padding),
+                members = members,
+                payments = payments,
+                expenses = expenses,
+                onExport = { exportLauncher.launch("uwapo-report-${System.currentTimeMillis()}.csv") }
             )
         }
     }
@@ -546,7 +562,13 @@ private fun DashboardScreen(
     val context = LocalContext.current
     val netBalance = lifetimeTotal - expensesTotal
 
-    Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    Column(
+        modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
         Text(stringResource(R.string.dashboard_title), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
         Text(stringResource(R.string.financial_overview, month), color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -592,25 +614,43 @@ private fun DashboardScreen(
                 Text(stringResource(R.string.target_default_note), color = MaterialTheme.colorScheme.onPrimary.copy(alpha = .8f), style = MaterialTheme.typography.bodySmall)
             }
         }
+
+        Spacer(Modifier.height(16.dp))
     }
 }
 
 @Composable
 private fun MetricCard(title: String, value: String, modifier: Modifier = Modifier) {
     Card(modifier, shape = RoundedCornerShape(16.dp)) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = value,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
 
 data class BatchYear(
-    val startYear: Int,
-    val endYear: Int
+    val year: Int
 ) {
-    val displayLabel: String get() = "$startYear/$endYear"
-    val periodLabel: String get() = "July $startYear – June $endYear"
+    val displayLabel: String get() = "$year"
+    val periodLabel: String get() = "January $year – December $year"
 }
 
 enum class ContributionPeriod(
@@ -621,10 +661,7 @@ enum class ContributionPeriod(
     TERM_2(R.string.term_2_title, 7..12);
 
     fun getYear(batchYear: BatchYear): Int {
-        return when (this) {
-            TERM_1 -> batchYear.endYear   // e.g. 2025 for 2024/2025
-            TERM_2 -> batchYear.startYear // e.g. 2024 for 2024/2025
-        }
+        return batchYear.year
     }
 }
 
@@ -639,8 +676,7 @@ private fun AddBatchYearDialog(
     onDismiss: () -> Unit,
     onAdd: (BatchYear) -> Unit
 ) {
-    var startYearText by remember { mutableStateOf("") }
-    var endYearText by remember { mutableStateOf("") }
+    var yearText by remember { mutableStateOf("") }
     var errorText by remember { mutableStateOf("") }
 
     AlertDialog(
@@ -649,16 +685,9 @@ private fun AddBatchYearDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
-                    value = startYearText,
-                    onValueChange = { startYearText = it; errorText = "" },
-                    label = { Text(stringResource(R.string.start_year_label)) },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                )
-                OutlinedTextField(
-                    value = endYearText,
-                    onValueChange = { endYearText = it; errorText = "" },
-                    label = { Text(stringResource(R.string.end_year_label)) },
+                    value = yearText,
+                    onValueChange = { yearText = it; errorText = "" },
+                    label = { Text(stringResource(R.string.batch_year_input_label)) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                 )
@@ -670,12 +699,11 @@ private fun AddBatchYearDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    val s = startYearText.toIntOrNull()
-                    val e = endYearText.toIntOrNull()
-                    if (s == null || e == null || e <= s) {
-                        errorText = "Enter valid start and end years (e.g. 2024 and 2025)."
+                    val y = yearText.toIntOrNull()
+                    if (y == null || y < 2000 || y > 2100) {
+                        errorText = "Enter a valid year (e.g. 2025)."
                     } else {
-                        onAdd(BatchYear(s, e))
+                        onAdd(BatchYear(y))
                     }
                 }
             ) {
@@ -692,13 +720,13 @@ private fun AddBatchYearDialog(
 
 private fun getBatchEndTimestamp(batchYear: BatchYear): Long {
     val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("Africa/Dar_es_Salaam"))
-    cal.set(batchYear.endYear, java.util.Calendar.JUNE, 30, 23, 59, 59)
+    cal.set(batchYear.year, java.util.Calendar.DECEMBER, 31, 23, 59, 59)
     return cal.timeInMillis
 }
 
 private fun getBatchStartTimestamp(batchYear: BatchYear): Long {
     val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("Africa/Dar_es_Salaam"))
-    cal.set(batchYear.startYear, java.util.Calendar.JULY, 1, 0, 0, 0)
+    cal.set(batchYear.year, java.util.Calendar.JANUARY, 1, 0, 0, 0)
     return cal.timeInMillis
 }
 
@@ -722,18 +750,19 @@ private fun MembersScreen(
 
     val defaultBatchYears = remember(payments, customBatchYears.size) {
         val base = mutableListOf(
-            BatchYear(2023, 2024),
-            BatchYear(2024, 2025),
-            BatchYear(2025, 2026),
-            BatchYear(2026, 2027)
+            BatchYear(2023),
+            BatchYear(2024),
+            BatchYear(2025),
+            BatchYear(2026),
+            BatchYear(2027)
         )
         payments.map { it.periodYear }.distinct().forEach { yr ->
-            if (base.none { it.startYear == yr || it.endYear == yr }) {
-                base.add(BatchYear(yr, yr + 1))
+            if (base.none { it.year == yr }) {
+                base.add(BatchYear(yr))
             }
         }
         base.addAll(customBatchYears)
-        base.distinctBy { "${it.startYear}/${it.endYear}" }.sortedByDescending { it.startYear }
+        base.distinctBy { it.year }.sortedByDescending { it.year }
     }
 
     Column(modifier = modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 6.dp)) {
@@ -807,7 +836,7 @@ private fun MembersScreen(
         AddBatchYearDialog(
             onDismiss = { showAddBatchDialog = false },
             onAdd = { newBatch ->
-                if (customBatchYears.none { it.startYear == newBatch.startYear && it.endYear == newBatch.endYear }) {
+                if (customBatchYears.none { it.year == newBatch.year }) {
                     customBatchYears.add(newBatch)
                 }
                 showAddBatchDialog = false
@@ -833,7 +862,7 @@ private fun Step1SelectBatchView(
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    "Academic/financial year batches for member contributions",
+                    "Annual batches for member contributions",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -845,15 +874,11 @@ private fun Step1SelectBatchView(
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(batchYears, key = { it.displayLabel }) { batch ->
-                val term1Year = batch.endYear
-                val term2Year = batch.startYear
                 val batchPayments = payments.filter {
-                    it.syncStatus != "reversed" &&
-                    ((it.periodYear == term2Year && it.periodMonth in 7..12) || (it.periodYear == term1Year && it.periodMonth in 1..6))
+                    it.syncStatus != "reversed" && it.periodYear == batch.year
                 }
                 val totalCollected = batchPayments.sumOf { it.amountTzs }
-                val batchEndMillis = getBatchEndTimestamp(batch)
-                val batchActiveMembersCount = members.count { it.status == "active" && it.joinedAt <= batchEndMillis }
+                val batchActiveMembersCount = members.count { it.status == "active" }
 
                 Card(
                     modifier = Modifier
@@ -927,9 +952,8 @@ private fun Step2SelectPeriodView(
     onBack: () -> Unit,
     onSelectPeriod: (ContributionPeriod) -> Unit
 ) {
-    val batchEndMillis = remember(batchYear) { getBatchEndTimestamp(batchYear) }
-    val activeMembers = remember(members, batchEndMillis) {
-        members.filter { it.status == "active" && it.joinedAt <= batchEndMillis }
+    val activeMembers = remember(members) {
+        members.filter { it.status == "active" }
     }
 
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1041,9 +1065,8 @@ private fun Step3PeriodDetailsView(
     var selectedStatusFilter by remember { mutableStateOf("all") }
     var expandedMemberId by remember { mutableStateOf<String?>(null) }
 
-    val batchEndMillis = remember(batchYear) { getBatchEndTimestamp(batchYear) }
-    val eligibleMembers = remember(members, batchEndMillis) {
-        members.filter { it.joinedAt <= batchEndMillis }
+    val eligibleMembers = remember(members) {
+        members.filter { it.status == "active" }
     }
 
     val targetYear = remember(batchYear, period) { period.getYear(batchYear) }
@@ -1388,24 +1411,15 @@ private fun PaymentsScreen(
     var selectedBatchFilter by remember { mutableStateOf("all") }
 
     val availableBatches = remember(payments) {
-        val years = payments.map { p ->
-            if (p.periodMonth >= 7) "${p.periodYear}/${p.periodYear + 1}"
-            else "${p.periodYear - 1}/${p.periodYear}"
-        }.distinct().sortedDescending()
+        val years = payments.map { p -> p.periodYear.toString() }.distinct().sortedDescending()
         listOf("all") + years
     }
 
     val groupedPayments = remember(payments, selectedBatchFilter) {
         payments.filter { p ->
             if (selectedBatchFilter == "all") true
-            else {
-                val batchLabel = if (p.periodMonth >= 7) "${p.periodYear}/${p.periodYear + 1}" else "${p.periodYear - 1}/${p.periodYear}"
-                batchLabel == selectedBatchFilter
-            }
-        }.groupBy { p ->
-            if (p.periodMonth >= 7) "${p.periodYear}/${p.periodYear + 1}"
-            else "${p.periodYear - 1}/${p.periodYear}"
-        }
+            else p.periodYear.toString() == selectedBatchFilter
+        }.groupBy { p -> p.periodYear.toString() }
     }
 
     Column(modifier = modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1498,34 +1512,181 @@ private fun PaymentsScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ReportsScreen(
     modifier: Modifier,
-    monthTotal: Long,
-    yearlyTotal: Long,
-    expensesTotal: Long,
-    memberCount: Int,
-    activeCount: Int,
-    paymentCount: Int,
-    defaulters: List<MemberEntity>,
+    members: List<MemberEntity>,
     payments: List<PaymentEntity>,
+    expenses: List<ExpenseEntity>,
     onExport: () -> Unit
 ) {
     val context = LocalContext.current
-    val monthStr = SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(Date())
-    val netBalance = yearlyTotal - expensesTotal
+    var selectedReportType by rememberSaveable { mutableIntStateOf(0) } // 0 = Monthly, 1 = Annual
 
-    val batchBreakdown = remember(payments) {
-        payments.filter { it.syncStatus != "reversed" }
-            .groupBy { p ->
-                if (p.periodMonth >= 7) "${p.periodYear}/${p.periodYear + 1}"
-                else "${p.periodYear - 1}/${p.periodYear}"
+    val currentCal = remember { Calendar.getInstance() }
+    var selectedYear by rememberSaveable { mutableIntStateOf(currentCal.get(Calendar.YEAR)) }
+    var selectedMonth by rememberSaveable { mutableIntStateOf(currentCal.get(Calendar.MONTH) + 1) }
+
+    val monthNames = remember {
+        listOf("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
+    }
+
+    val activeMembers = remember(members) { members.filter { it.status == "active" } }
+    val activeCount = activeMembers.size
+
+    val availableYears = remember(payments, expenses) {
+        val y1 = payments.map { it.periodYear }
+        val y2 = expenses.map {
+            val c = Calendar.getInstance()
+            c.timeInMillis = it.expenseDate
+            c.get(Calendar.YEAR)
+        }
+        (y1 + y2 + currentCal.get(Calendar.YEAR)).distinct().sortedDescending()
+    }
+
+    // --- MONTHLY DATA ---
+    val monthlyPayments = remember(payments, selectedYear, selectedMonth) {
+        payments.filter { it.syncStatus != "reversed" && it.periodYear == selectedYear && it.periodMonth == selectedMonth }
+    }
+    val monthlyCollections = remember(monthlyPayments) { monthlyPayments.sumOf { it.amountTzs } }
+
+    val monthlyApprovedExpenses = remember(expenses, selectedYear, selectedMonth) {
+        expenses.filter { exp ->
+            (exp.status == "paid" || exp.status == "approved") && run {
+                val c = Calendar.getInstance()
+                c.timeInMillis = exp.expenseDate
+                c.get(Calendar.YEAR) == selectedYear && (c.get(Calendar.MONTH) + 1) == selectedMonth
             }
-            .mapValues { entry -> entry.value.sumOf { it.amountTzs } }
+        }
+    }
+    val monthlyExpensesTotal = remember(monthlyApprovedExpenses) { monthlyApprovedExpenses.sumOf { it.amountTzs } }
+    val monthlyNetMovement = monthlyCollections - monthlyExpensesTotal
+
+    val expectedMonthly = activeCount.toLong() * 10000L
+    val estimatedMonthlyArrears = (expectedMonthly - monthlyCollections).coerceAtLeast(0L)
+
+    val monthlyPaidMemberIds = remember(monthlyPayments) {
+        monthlyPayments.groupBy { it.memberId }.filter { it.value.sumOf { p -> p.amountTzs } >= 10000L }.keys
+    }
+    val monthlyArrearsMembers = remember(activeMembers, monthlyPaidMemberIds) {
+        activeMembers.filter { it.id !in monthlyPaidMemberIds }
+    }
+
+    val monthlyBatchBreakdown = remember(monthlyPayments) {
+        monthlyPayments.groupBy { p -> p.periodYear.toString() }.mapValues { entry -> entry.value.sumOf { it.amountTzs } }
+    }
+
+    // --- ANNUAL DATA ---
+    val annualPayments = remember(payments, selectedYear) {
+        payments.filter { it.syncStatus != "reversed" && it.periodYear == selectedYear }
+    }
+    val annualCollections = remember(annualPayments) { annualPayments.sumOf { it.amountTzs } }
+
+    val annualApprovedExpenses = remember(expenses, selectedYear) {
+        expenses.filter { exp ->
+            (exp.status == "paid" || exp.status == "approved") && run {
+                val c = Calendar.getInstance()
+                c.timeInMillis = exp.expenseDate
+                c.get(Calendar.YEAR) == selectedYear
+            }
+        }
+    }
+    val annualExpensesTotal = remember(annualApprovedExpenses) { annualApprovedExpenses.sumOf { it.amountTzs } }
+    val annualNetMovement = annualCollections - annualExpensesTotal
+
+    val expectedAnnual = activeCount.toLong() * 120000L
+    val estimatedAnnualShortfall = (expectedAnnual - annualCollections).coerceAtLeast(0L)
+
+    val annualMonthlyBreakdown = remember(annualPayments) {
+        (1..12).associate { m ->
+            monthNames[m - 1] to annualPayments.filter { p -> p.periodMonth == m }.sumOf { it.amountTzs }
+        }
+    }
+
+    val annualBatchBreakdown = remember(annualPayments) {
+        annualPayments.groupBy { p -> p.periodYear.toString() }.mapValues { entry -> entry.value.sumOf { it.amountTzs } }
+    }
+
+    val annualArrearsMembers = remember(activeMembers, annualPayments) {
+        activeMembers.filter { m ->
+            annualPayments.filter { p -> p.memberId == m.id }.sumOf { it.amountTzs } < 120000L
+        }
     }
 
     Column(modifier = modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(stringResource(R.string.reports_title), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+
+        // View Selector Tabs (Monthly vs Annual)
+        TabRow(selectedTabIndex = selectedReportType) {
+            Tab(
+                selected = selectedReportType == 0,
+                onClick = { selectedReportType = 0 },
+                text = { Text(stringResource(R.string.monthly_report_tab), fontWeight = FontWeight.Bold) }
+            )
+            Tab(
+                selected = selectedReportType == 1,
+                onClick = { selectedReportType = 1 },
+                text = { Text(stringResource(R.string.annual_report_tab), fontWeight = FontWeight.Bold) }
+            )
+        }
+
+        // Controls row (Year & Month Selector)
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            var yearExpanded by remember { mutableStateOf(false) }
+            ExposedDropdownMenuBox(
+                expanded = yearExpanded,
+                onExpandedChange = { yearExpanded = !yearExpanded },
+                modifier = Modifier.weight(1f)
+            ) {
+                OutlinedTextField(
+                    value = "Year: $selectedYear",
+                    onValueChange = {},
+                    readOnly = true,
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = yearExpanded) },
+                    modifier = Modifier.menuAnchor().fillMaxWidth(),
+                    textStyle = MaterialTheme.typography.bodyMedium
+                )
+                ExposedDropdownMenu(expanded = yearExpanded, onDismissRequest = { yearExpanded = false }) {
+                    availableYears.forEach { yr ->
+                        DropdownMenuItem(
+                            text = { Text(yr.toString()) },
+                            onClick = { selectedYear = yr; yearExpanded = false }
+                        )
+                    }
+                }
+            }
+
+            if (selectedReportType == 0) {
+                var monthExpanded by remember { mutableStateOf(false) }
+                ExposedDropdownMenuBox(
+                    expanded = monthExpanded,
+                    onExpandedChange = { monthExpanded = !monthExpanded },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    OutlinedTextField(
+                        value = monthNames[selectedMonth - 1],
+                        onValueChange = {},
+                        readOnly = true,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = monthExpanded) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth(),
+                        textStyle = MaterialTheme.typography.bodyMedium
+                    )
+                    ExposedDropdownMenu(expanded = monthExpanded, onDismissRequest = { monthExpanded = false }) {
+                        (1..12).forEach { m ->
+                            DropdownMenuItem(
+                                text = { Text(monthNames[m - 1]) },
+                                onClick = { selectedMonth = m; monthExpanded = false }
+                            )
+                        }
+                    }
+                }
+            }
+        }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onExport, modifier = Modifier.weight(1f)) {
@@ -1536,16 +1697,40 @@ private fun ReportsScreen(
 
             Button(
                 onClick = {
-                    val file = PdfGenerator.generateReportPdf(
-                        context,
-                        "Monthly Report - $monthStr",
-                        monthTotal,
-                        yearlyTotal,
-                        expensesTotal,
-                        memberCount,
-                        defaulters,
-                        batchBreakdown
-                    )
+                    val periodTitle = if (selectedReportType == 0) "${monthNames[selectedMonth - 1]} $selectedYear" else "Year $selectedYear"
+                    val file = if (selectedReportType == 0) {
+                        PdfGenerator.generateReportPdf(
+                            context = context,
+                            reportType = "Monthly",
+                            periodTitle = periodTitle,
+                            collectionsTotal = monthlyCollections,
+                            expensesTotal = monthlyExpensesTotal,
+                            netMovement = monthlyNetMovement,
+                            expectedContributions = expectedMonthly,
+                            estimatedArrears = estimatedMonthlyArrears,
+                            memberCount = members.size,
+                            activeCount = activeCount,
+                            breakdownMap = monthlyBatchBreakdown,
+                            breakdownTitle = "Batch Collection Breakdown",
+                            arrearsMembers = monthlyArrearsMembers
+                        )
+                    } else {
+                        PdfGenerator.generateReportPdf(
+                            context = context,
+                            reportType = "Annual",
+                            periodTitle = periodTitle,
+                            collectionsTotal = annualCollections,
+                            expensesTotal = annualExpensesTotal,
+                            netMovement = annualNetMovement,
+                            expectedContributions = expectedAnnual,
+                            estimatedArrears = estimatedAnnualShortfall,
+                            memberCount = members.size,
+                            activeCount = activeCount,
+                            breakdownMap = annualMonthlyBreakdown,
+                            breakdownTitle = "Monthly Collection Breakdown",
+                            arrearsMembers = annualArrearsMembers
+                        )
+                    }
                     PdfGenerator.viewPdf(context, file)
                 },
                 modifier = Modifier.weight(1f)
@@ -1557,59 +1742,108 @@ private fun ReportsScreen(
         }
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            item {
-                MetricCard(stringResource(R.string.net_balance), money(netBalance), Modifier.fillMaxWidth())
-            }
-            item {
-                MetricCard(stringResource(R.string.current_month_recorded), money(monthTotal), Modifier.fillMaxWidth())
-            }
-            item {
-                MetricCard(stringResource(R.string.total_collections), money(yearlyTotal), Modifier.fillMaxWidth())
-            }
-            item {
-                MetricCard(stringResource(R.string.total_expenses), money(expensesTotal), Modifier.fillMaxWidth())
-            }
-
-            if (batchBreakdown.isNotEmpty()) {
+            if (selectedReportType == 0) {
                 item {
-                    Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
-                        Column(Modifier.padding(14.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(stringResource(R.string.batch_collections_summary), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                            batchBreakdown.forEach { (batchLabel, collected) ->
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text("Batch $batchLabel", fontWeight = FontWeight.SemiBold)
-                                    Text(money(collected), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    MetricCard(stringResource(R.string.monthly_net_movement), money(monthlyNetMovement), Modifier.fillMaxWidth())
+                }
+                item {
+                    MetricCard(stringResource(R.string.monthly_collections), money(monthlyCollections), Modifier.fillMaxWidth())
+                }
+                item {
+                    MetricCard(stringResource(R.string.total_expenses), money(monthlyExpensesTotal), Modifier.fillMaxWidth())
+                }
+                item {
+                    MetricCard(stringResource(R.string.expected_monthly), money(expectedMonthly), Modifier.fillMaxWidth())
+                }
+                item {
+                    MetricCard(stringResource(R.string.outstanding_estimate), money(estimatedMonthlyArrears), Modifier.fillMaxWidth())
+                }
+
+                if (monthlyBatchBreakdown.isNotEmpty()) {
+                    item {
+                        Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+                            Column(Modifier.padding(14.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(stringResource(R.string.batch_collections_summary), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                monthlyBatchBreakdown.forEach { (batchLabel, collected) ->
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text("Batch $batchLabel", fontWeight = FontWeight.SemiBold)
+                                        Text(money(collected), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
 
-            item {
-                MetricCard(stringResource(R.string.expected_month_formula), money(activeCount.toLong() * 10000L), Modifier.fillMaxWidth())
-            }
-            item {
-                MetricCard(stringResource(R.string.outstanding_estimate), money((activeCount.toLong() * 10000L - monthTotal).coerceAtLeast(0L)), Modifier.fillMaxWidth())
-            }
-
-            item {
-                Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-                    Column(Modifier.padding(14.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(stringResource(R.string.defaulters_list), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                        if (defaulters.isEmpty()) {
-                            Text(stringResource(R.string.no_defaulters), color = MaterialTheme.colorScheme.primary)
-                        } else {
-                            Text(stringResource(R.string.defaulters_count, defaulters.size), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                            defaulters.take(10).forEach { m ->
-                                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text("${m.fullName} (${m.memberNo})", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                                    if (m.phone.isNotBlank()) {
-                                        IconButton(onClick = {
-                                            ReminderManager.sendSmsReminder(context, m.phone, m.fullName, monthStr)
-                                        }) {
-                                            Icon(Icons.Default.Sms, contentDescription = "SMS", tint = MaterialTheme.colorScheme.primary)
+                item {
+                    Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                        Column(Modifier.padding(14.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(stringResource(R.string.defaulters_list), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                            if (monthlyArrearsMembers.isEmpty()) {
+                                Text(stringResource(R.string.no_defaulters), color = MaterialTheme.colorScheme.primary)
+                            } else {
+                                Text(stringResource(R.string.defaulters_count, monthlyArrearsMembers.size), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                                monthlyArrearsMembers.forEach { m ->
+                                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Text("${m.fullName} (${m.memberNo})", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                                        if (m.phone.isNotBlank()) {
+                                            IconButton(onClick = {
+                                                ReminderManager.sendSmsReminder(context, m.phone, m.fullName, "${monthNames[selectedMonth - 1]} $selectedYear")
+                                            }) {
+                                                Icon(Icons.Default.Sms, contentDescription = "SMS", tint = MaterialTheme.colorScheme.primary)
+                                            }
                                         }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                item {
+                    MetricCard(stringResource(R.string.annual_net_movement), money(annualNetMovement), Modifier.fillMaxWidth())
+                }
+                item {
+                    MetricCard(stringResource(R.string.annual_collections), money(annualCollections), Modifier.fillMaxWidth())
+                }
+                item {
+                    MetricCard(stringResource(R.string.total_expenses), money(annualExpensesTotal), Modifier.fillMaxWidth())
+                }
+                item {
+                    MetricCard(stringResource(R.string.expected_annual), money(expectedAnnual), Modifier.fillMaxWidth())
+                }
+                item {
+                    MetricCard(stringResource(R.string.estimated_shortfall), money(annualExpensesTotal), Modifier.fillMaxWidth())
+                }
+
+                item {
+                    Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+                        Column(Modifier.padding(14.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(stringResource(R.string.monthly_breakdown), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                            annualMonthlyBreakdown.forEach { (mName, collected) ->
+                                if (collected > 0L) {
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text(mName, fontWeight = FontWeight.SemiBold)
+                                        Text(money(collected), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                        Column(Modifier.padding(14.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("Annual Arrears Summary (${annualArrearsMembers.size})", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                            if (annualArrearsMembers.isEmpty()) {
+                                Text("All active members have fulfilled annual contributions!", color = MaterialTheme.colorScheme.primary)
+                            } else {
+                                annualArrearsMembers.forEach { m ->
+                                    val mPaid = annualPayments.filter { p -> p.memberId == m.id }.sumOf { it.amountTzs }
+                                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Text("${m.fullName} (${m.memberNo})", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                                        Text("Paid: ${money(mPaid)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
                                     }
                                 }
                             }

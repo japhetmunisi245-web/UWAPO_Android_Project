@@ -1,5 +1,3 @@
-import java.util.Properties
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -7,15 +5,9 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-val localProps = Properties().apply {
-    val file = rootProject.file("local.properties")
-    if (file.exists()) file.inputStream().use { load(it) }
-}
-fun buildConfigString(key: String): String = "\"" + (localProps.getProperty(key, "").replace("\\", "\\\\").replace("\"", "\\\"") ) + "\""
-
 android {
     namespace = "com.uwapo.app"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.uwapo.app"
@@ -24,8 +16,6 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        buildConfigField("String", "SUPABASE_URL", buildConfigString("uwapo.supabase.url"))
-        buildConfigField("String", "SUPABASE_ANON_KEY", buildConfigString("uwapo.supabase.anon_key"))
     }
 
     buildFeatures {
@@ -65,8 +55,7 @@ dependencies {
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("androidx.biometric:biometric:1.1.0")
     implementation("androidx.documentfile:documentfile:1.0.1")
-    implementation("net.zetetic:android-database-sqlcipher:4.5.4")
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("net.zetetic:sqlcipher-android:4.20.0")
     implementation("androidx.work:work-runtime-ktx:2.9.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     testImplementation("junit:junit:4.13.2")

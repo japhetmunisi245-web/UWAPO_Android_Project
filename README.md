@@ -1,40 +1,80 @@
-# UWAPO Android — Local-Only Edition
+# UWAPO Android — Committee-Ready Reporting Edition
 
-Native Android membership and contribution manager. **No Supabase, no cloud API, no account sign-in, and no network permissions.** Data is stored in the Room/SQLite database on this Android device.
+Native Android membership and contribution management application for **UWAPO**. Designed for local-only, secure, offline operation on Android devices with complete Room/SQLite storage and professional committee reporting.
 
-## Stack
-- Kotlin, Jetpack Compose, Material 3
-- MVVM-oriented UI and Room persistence
-- Local CSV import/export
-- Currency: TZS; default monthly contribution: TZS 10,000
+## 1. Local-Only Architecture
+- **Target Platform**: Android (Kotlin, Jetpack Compose, Material 3).
+- **Storage**: Room / SQLite local database with SQLCipher encrypted passphrase support.
+- **Security & Privacy**: No cloud dependencies, no remote servers, no external API calls, and no remote synchronization workers.
+- **Local Features**:
+  - Member management and profile history.
+  - Payment entry, receipt generation, and payment reversal.
+  - Expense tracking with local approval workflow (`pending_approval`, `approved`, `paid`, `rejected`).
+  - Automated local database backups via `ScheduledBackupWorker`.
+  - CSV import/export for batch records.
 
-## Open and build
-1. Install Android Studio, Android SDK 35, and JDK 17.
-2. Open this folder in Android Studio.
-3. Let Gradle sync and download AndroidX dependencies.
-4. Use **Build → Build APK(s)**.
-5. Debug APK normally appears at `app/build/outputs/apk/debug/app-debug.apk`.
+## 2. Monthly and Annual Committee Reporting
+The app provides a reporting hub supporting two distinct reporting periods:
 
-The source archive has not been compiled in this environment; build and test in Android Studio before relying on it for official records.
+### Monthly Reports
+- **Selected Month Collections**: Total recorded payments for the selected contribution month and year (`periodMonth` & `periodYear`), excluding reversed transactions.
+- **Approved Monthly Expenses**: Total expenses with status `paid` or `approved` recorded during that specific month/year based on `expenseDate`.
+- **Monthly Net Movement**: `Collections - Included Expenses`.
+- **Expected Monthly Contributions**: `Active Member Count × TZS 10,000`.
+- **Estimated Outstanding Arrears**: Estimated shortfall (`Expected - Collections`).
+- **Members in Arrears List**: Active members who have pending contributions for the selected month, with quick SMS reminder options.
 
-## Local data and backups
-- Records remain on the device and are not shared with committee members' other devices.
-- Use the app's CSV export regularly and store backups securely.
-- Uninstalling the app or clearing its data may erase the database. Android device backup is disabled in the manifest.
-- There is no cloud account, remote backup, or multi-device sync.
+### Annual Reports
+- **Annual Collections**: Sum of non-reversed payments recorded for the selected year (`periodYear`).
+- **Annual Approved Expenses**: Sum of expenses approved/paid during that year (`expenseDate`).
+- **Annual Net Movement**: `Annual Collections - Annual Expenses`.
+- **Expected Annual Contributions**: `Active Member Count × TZS 120,000`.
+- **Monthly Collection Breakdown**: Month-by-month contribution summary table (January to December).
+- **Annual Arrears Summary**: Active members with annual totals below the expected requirement.
 
-## Features
-- Dashboard and local totals
-- Member register and CSV import/export
-- Monthly payment recording and local receipts
-- Payment history and local reversal marking
-- Expense entry and local status management
-- Room database and local finance rules
+## 3. Professional Multi-Page PDF Reports
+PDF generation in `PdfGenerator.kt` provides committee-ready PDF documents:
+- **UWAPO Navy & White Design**: Header banner with branding, subtitle, and generation timestamp.
+- **Multi-Page Pagination Engine**: Automatically splits long content across multiple A4 pages without truncating data.
+- **Repeated Table Headers**: Tables spanning across pages automatically repeat header titles on subsequent pages.
+- **Footer Page Numbering**: Each page includes "UWAPO Management System · Page X of Y".
+- **Committee Sign-Off Block**: Dedicated preparation, review, and approval signature lines on the final page of financial reports:
+  ```
+  Prepared by: ________________________   Date: ______________
+  Reviewed by: ________________________   Date: ______________
+  Approved by: ________________________   Date: ______________
+  ```
 
-## Data migration
-Import the reviewed CSV register from the app. Verify all 57 names, month amounts, and totals against the paper register. Blank cells should be reviewed rather than automatically treated as zero payments. Export a backup after successful import.
+## 4. Member Statements
+Individual member statements generated from profile dialogs feature:
+- Complete payment history without row limits or truncation.
+- Columns: Date (`dd/MM/yyyy`), Contribution Period (`MM/YYYY`), Method, Receipt No., Status, and Amount (TZS).
+- Clear identification and exclusion of `REVERSED` payments from totals.
+- Multi-page support with repeated headers and footer page numbering.
 
-## Limitations
-- Local-only means one device is the authoritative copy. No live sharing, cloud backup, remote login, or synchronization.
-- Local payment reversal marks a payment as reversed for local totals; it is not a bank/mobile-money refund. Keep evidence and audit records outside the app if required by club policy.
-- Before production use, test database migration, import/export, balances, and restore from a CSV backup.
+## 5. Financial Safeguards & Principles
+- **Net Movement**: Calculated strictly as `Collections - Approved Expenses`.
+- **Expense Exclusion**: Pending and rejected expenses are excluded from financial totals.
+- **Reversal Exclusion**: Reversed payments are excluded from collection totals.
+- **Period Integrity**: Payments are filtered by contribution period (`periodYear`/`periodMonth`), whereas expenses are filtered by recorded expense date (`expenseDate`).
+
+## 6. Build Instructions
+1. Install Android Studio (Ladybug or later), Android SDK 35, and JDK 17.
+2. Open the project root folder in Android Studio.
+3. Allow Gradle sync to complete.
+4. Execute unit tests:
+   ```bash
+   ./gradlew :app:testDebugUnitTest
+   ```
+5. Assemble debug APK:
+   ```bash
+   ./gradlew :app:assembleDebug
+   ```
+6. The debug APK will be generated at `app/build/outputs/apk/debug/app-debug.apk`.
+
+## 7. Manual Verification Procedures
+1. **Reporting Switch**: Open Reports tab and toggle between "Monthly Report" and "Annual Report". Verify totals recalculate accurately.
+2. **PDF Generation**: Generate PDF reports for both Monthly and Annual views. Verify pagination, repeated headers, page numbers, and committee sign-off block.
+3. **Member Statement PDF**: Open a member's profile and export PDF statement. Verify all historical payment records are displayed without truncation.
+4. **CSV Import/Export**: Import a member register CSV and export backup CSV from the Reports tab.
+5. **Database Persistence**: Restart the app and confirm local Room records survive app restarts.
