@@ -76,18 +76,7 @@ interface UWAPODao {
     @Query("SELECT COALESCE(SUM(amountTzs), 0) FROM expenses WHERE status = 'paid' OR status = 'approved'")
     fun observePaidExpensesTotal(): Flow<Long>
 
-    @Query("SELECT * FROM members WHERE syncStatus != 'synced'")
-    suspend fun pendingMembers(): List<MemberEntity>
-    @Query("UPDATE members SET syncStatus = :syncStatus WHERE id = :id")
-    suspend fun setMemberSyncStatus(id: String, syncStatus: String)
 
-    @Query("SELECT * FROM payments WHERE syncStatus != 'synced' AND syncStatus != 'reversed'")
-    suspend fun pendingPayments(): List<PaymentEntity>
-    @Query("UPDATE payments SET syncStatus = :syncStatus, receiptNo = :receiptNo WHERE id = :id")
-    suspend fun setPaymentSyncStatus(id: String, syncStatus: String, receiptNo: String)
 
-    @Query("SELECT * FROM expenses WHERE syncStatus != 'synced'")
-    suspend fun pendingExpenses(): List<ExpenseEntity>
-    @Query("UPDATE expenses SET syncStatus = :syncStatus WHERE id = :id")
-    suspend fun setExpenseSyncStatus(id: String, syncStatus: String)
+
 }
