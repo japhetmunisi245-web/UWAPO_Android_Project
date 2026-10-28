@@ -134,71 +134,102 @@ object PdfGenerator {
         payments: List<PaymentEntity>
     ): File {
         val document = PdfDocument()
-        val pageInfo = PdfDocument.PageInfo.Builder(595, 842, 1).create()
-        val page = document.startPage(pageInfo)
-        val canvas = page.canvas
         val paint = Paint().apply { isAntiAlias = true }
+        val orderedPayments = payments.sortedBy { it.paidAt }
+        val totalPaid = orderedPayments.filter { it.syncStatus != "reversed" }.sumOf { it.amountTzs }
+        var pageNumber = 0
+        lateinit var page: PdfDocument.Page
+        lateinit var canvas: android.graphics.Canvas
+        var y = 0f
 
-        // Header
-        paint.color = Color.parseColor("#17365D")
-        canvas.drawRect(0f, 0f, 595f, 100f, paint)
-
-        paint.color = Color.WHITE
-        paint.textSize = 22f
-        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        canvas.drawText("UWAPO - MEMBER STATEMENT", 40f, 50f, paint)
-
-        paint.textSize = 13f
-        paint.typeface = Typeface.DEFAULT
-        canvas.drawText("Taarifa ya Michango ya Mwanachama", 40f, 78f, paint)
-
-        // Member Header Info
-        paint.color = Color.BLACK
-        paint.textSize = 14f
-        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        canvas.drawText("${member.fullName} (${member.memberNo})", 40f, 130f, paint)
-
-        paint.textSize = 12f
-        paint.typeface = Typeface.DEFAULT
-        canvas.drawText("Phone / Simu: ${member.phone.ifBlank { "N/A" }}", 40f, 150f, paint)
-        canvas.drawText("Status / Hali: ${member.status.uppercase()}", 350f, 150f, paint)
-
-        val totalPaid = payments.filter { it.syncStatus != "reversed" }.sumOf { it.amountTzs }
-        canvas.drawText("Total Recorded: ${money(totalPaid)}", 40f, 170f, paint)
-
-        // Table Header
-        paint.color = Color.parseColor("#17365D")
-        canvas.drawRect(40f, 190f, 555f, 215f, paint)
-
-        paint.color = Color.WHITE
-        paint.textSize = 11f
-        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        canvas.drawText("DATE / TAREHE", 50f, 207f, paint)
-        canvas.drawText("PERIOD", 180f, 207f, paint)
-        canvas.drawText("METHOD", 270f, 207f, paint)
-        canvas.drawText("RECEIPT", 370f, 207f, paint)
-        canvas.drawText("AMOUNT", 480f, 207f, paint)
-
-        paint.color = Color.BLACK
-        paint.typeface = Typeface.DEFAULT
-        var y = 235f
-
-        payments.take(25).forEach { payment ->
-            val dStr = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(payment.paidAt))
-            val pStr = "${payment.periodMonth.toString().padStart(2, '0')}/${payment.periodYear}"
-            canvas.drawText(dStr, 50f, y, paint)
-            canvas.drawText(pStr, 180f, y, paint)
-            canvas.drawText(payment.method.take(10), 270f, y, paint)
-            canvas.drawText(payment.receiptNo.take(12), 370f, y, paint)
-            canvas.drawText(money(payment.amountTzs), 480f, y, paint)
-            y += 20f
+        fun startPage() {
+            if (pageNumber > 0) document.finishPage(page)
+            pageNumber++
+            page = document.startPage(PdfDocument.PageInfo.Builder(595, 842, pageNumber).create())
+            canvas = page.canvas
+            paint.color = Color.parseColor("#17365D")
+            canvas.drawRect(0f, 0f, 595f, 105f, paint)
+            paint.color = Color.WHITE
+            paint.textSize = 21f
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            canvas.drawText("UWAPO - MEMBER STATEMENT", 40f, 42f, paint)
+            paint.textSize = 12f
+            paint.typeface = Typeface.DEFAULT
+            canvas.drawText("Taarifa ya Michango ya Mwanachama", 40f, 68f, paint)
+            paint.textSize = 10f
+            canvas.drawText("Generated: ${SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault()).format(Date())}", 40f, 88f, paint)
+            paint.color = Color.LTGRAY
+            canvas.drawLine(40f, 802f, 555f, 802f, paint)
+            paint.color = Color.GRAY
+            paint.textSize = 9f
+            canvas.drawText("UWAPO • Local records • Amounts in TZS", 40f, 820f, paint)
+            canvas.drawText("Page $pageNumber", 505f, 820f, paint)
+            y = 125f
+            paint.color = Color.BLACK
+            paint.textSize = 12f
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            canvas.drawText("${member.fullName} (${member.memberNo})", 40f, y, paint)
+            y += 18f
+            paint.textSize = 10f
+            paint.typeface = Typeface.DEFAULT
+            canvas.drawText("Phone: ${member.phone.ifBlank { "N/A" }}    Status: ${member.status.uppercase()}", 40f, y, paint)
+            y += 18f
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            canvas.drawText("Total recorded (excluding reversals): ${money(totalPaid)}", 40f, y, paint)
+            y += 24f
+            drawTableHeader()
         }
 
-        document.finishPage(page)
-        val file = File(context.cacheDir, "statement_${member.memberNo}.pdf")
-        FileOutputStream(file).use { out -> document.writeTo(out) }
-        document.close()
-        return file
+        fun drawTableHeader() {
+            paint.color = Color.parseColor("#17365D")
+            canvas.drawRect(40f, y, 555f, y + 24f, paint)
+            paint.color = Color.WHITE
+            paint.textSize = 9f
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            canvas.drawText("DATE", 48f, y + 16f, paint)
+            canvas.drawText("PERIOD", 130f, y + 16f, paint)
+            canvas.drawText("METHOD", 205f, y + 16f, paint)
+            canvas.drawText("RECEIPT", 300f, y + 16f, paint)
+            canvas.drawText("STATUS", 410f, y + 16f, paint)
+            canvas.drawText("AMOUNT TZS", 475f, y + 16f, paint)
+            y += 24f
+            paint.color = Color.BLACK
+            paint.textSize = 9f
+            paint.typeface = Typeface.DEFAULT
+        }
+
+        try {
+            startPage()
+            if (orderedPayments.isEmpty()) {
+                paint.textSize = 11f
+                canvas.drawText("No payment records for this member.", 48f, y + 18f, paint)
+            } else {
+                orderedPayments.forEach { payment ->
+                    if (y + 20f > 785f) {
+                        startPage()
+                    }
+                    val date = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(payment.paidAt))
+                    val period = "${payment.periodMonth.toString().padStart(2, '0')}/${payment.periodYear}"
+                    canvas.drawText(date, 48f, y + 13f, paint)
+                    canvas.drawText(period, 130f, y + 13f, paint)
+                    canvas.drawText(payment.method.replace('_', ' ').take(13), 205f, y + 13f, paint)
+                    canvas.drawText(payment.receiptNo.take(17), 300f, y + 13f, paint)
+                    canvas.drawText(payment.syncStatus.uppercase().take(10), 410f, y + 13f, paint)
+                    canvas.drawText(money(payment.amountTzs).take(16), 475f, y + 13f, paint)
+                    paint.color = Color.parseColor("#D8DEE8")
+                    canvas.drawLine(40f, y + 18f, 555f, y + 18f, paint)
+                    paint.color = Color.BLACK
+                    y += 20f
+                }
+            }
+            document.finishPage(page)
+            val safeMember = member.memberNo.replace(Regex("[^A-Za-z0-9_-]"), "_")
+            val file = File(context.cacheDir, "statement_${safeMember}_${System.currentTimeMillis()}.pdf")
+            FileOutputStream(file).use { out -> document.writeTo(out) }
+            return file
+        } finally {
+            document.close()
+        }
     }
 
     fun generateReportPdf(
