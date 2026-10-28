@@ -142,6 +142,25 @@ object PdfGenerator {
         lateinit var canvas: android.graphics.Canvas
         var y = 0f
 
+        fun drawTableHeader() {
+            paint.color = Color.parseColor("#17365D")
+            canvas.drawRect(40f, y, 555f, y + 24f, paint)
+            paint.color = Color.WHITE
+            paint.textSize = 9f
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            canvas.drawText("DATE", 48f, y + 16f, paint)
+            canvas.drawText("PERIOD", 130f, y + 16f, paint)
+            canvas.drawText("METHOD", 205f, y + 16f, paint)
+            canvas.drawText("RECEIPT", 300f, y + 16f, paint)
+            canvas.drawText("STATUS", 410f, y + 16f, paint)
+            canvas.drawText("AMOUNT TZS", 475f, y + 16f, paint)
+            y += 24f
+            paint.color = Color.BLACK
+            paint.textSize = 9f
+            paint.typeface = Typeface.DEFAULT
+        }
+
+
         fun startPage() {
             if (pageNumber > 0) document.finishPage(page)
             pageNumber++
@@ -180,23 +199,6 @@ object PdfGenerator {
             drawTableHeader()
         }
 
-        fun drawTableHeader() {
-            paint.color = Color.parseColor("#17365D")
-            canvas.drawRect(40f, y, 555f, y + 24f, paint)
-            paint.color = Color.WHITE
-            paint.textSize = 9f
-            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            canvas.drawText("DATE", 48f, y + 16f, paint)
-            canvas.drawText("PERIOD", 130f, y + 16f, paint)
-            canvas.drawText("METHOD", 205f, y + 16f, paint)
-            canvas.drawText("RECEIPT", 300f, y + 16f, paint)
-            canvas.drawText("STATUS", 410f, y + 16f, paint)
-            canvas.drawText("AMOUNT TZS", 475f, y + 16f, paint)
-            y += 24f
-            paint.color = Color.BLACK
-            paint.textSize = 9f
-            paint.typeface = Typeface.DEFAULT
-        }
 
         try {
             startPage()
