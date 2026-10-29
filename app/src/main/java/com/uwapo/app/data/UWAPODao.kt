@@ -77,4 +77,11 @@ interface UWAPODao {
     fun observeLifetimeTotal(): Flow<Long>
     @Query("SELECT COALESCE(SUM(amountTzs), 0) FROM expenses WHERE status = 'paid' OR status = 'approved'")
     fun observePaidExpensesTotal(): Flow<Long>
+<<<<<<< HEAD
+=======
+
+
+
+
+>>>>>>> fef975d8d515490084c5c154ca0583aa3ec0c026
 }

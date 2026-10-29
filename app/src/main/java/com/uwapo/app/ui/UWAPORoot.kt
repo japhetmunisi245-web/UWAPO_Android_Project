@@ -316,11 +316,16 @@ fun UWAPORoot(dao: UWAPODao) {
                 onDeleteExpense = { expenseToDelete = it }
             )
             Tab.REPORTS -> ReportsScreen(
+<<<<<<< HEAD
                 modifier = Modifier.padding(padding),
                 members = members,
                 payments = payments,
                 expenses = expenses,
                 onExport = { exportLauncher.launch("uwapo-report-${System.currentTimeMillis()}.csv") }
+=======
+                Modifier.padding(padding), monthTotal, yearlyTotal, members.size, activeCount, payments.size, defaulters, payments, expenses,
+                onExport = { exportLauncher.launch("uwapo-register-${System.currentTimeMillis()}.csv") }
+>>>>>>> fef975d8d515490084c5c154ca0583aa3ec0c026
             )
         }
     }
@@ -1484,12 +1489,22 @@ private fun PaymentsScreen(
 @Composable
 private fun ReportsScreen(
     modifier: Modifier,
+<<<<<<< HEAD
     members: List<MemberEntity>,
+=======
+    monthTotal: Long,
+    yearlyTotal: Long,
+    memberCount: Int,
+    activeCount: Int,
+    paymentCount: Int,
+    defaulters: List<MemberEntity>,
+>>>>>>> fef975d8d515490084c5c154ca0583aa3ec0c026
     payments: List<PaymentEntity>,
     expenses: List<ExpenseEntity>,
     onExport: () -> Unit
 ) {
     val context = LocalContext.current
+<<<<<<< HEAD
     var selectedReportType by rememberSaveable { mutableIntStateOf(0) } // 0 = Monthly, 1 = Annual
 
     val currentCal = remember { Calendar.getInstance() }
@@ -1628,11 +1643,44 @@ private fun ReportsScreen(
 
     val grandTotalTerm = remember(termMemberRows) {
         termMemberRows.sumOf { it.totalAmount }
+=======
+    val monthStr = SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(Date())
+    val calendar = remember { Calendar.getInstance() }
+    val currentYear = calendar.get(Calendar.YEAR)
+    val currentMonth = calendar.get(Calendar.MONTH) + 1
+    var reportPeriod by rememberSaveable { mutableStateOf("monthly") }
+
+    val monthlyExpenses = remember(expenses, currentYear, currentMonth) {
+        expenses.filter { expense ->
+            val date = Calendar.getInstance().apply { timeInMillis = expense.expenseDate }
+            (expense.status == "paid" || expense.status == "approved") &&
+                date.get(Calendar.YEAR) == currentYear && date.get(Calendar.MONTH) + 1 == currentMonth
+        }.sumOf { it.amountTzs }
+    }
+    val annualExpenses = remember(expenses, currentYear) {
+        expenses.filter { expense ->
+            val date = Calendar.getInstance().apply { timeInMillis = expense.expenseDate }
+            (expense.status == "paid" || expense.status == "approved") && date.get(Calendar.YEAR) == currentYear
+        }.sumOf { it.amountTzs }
+    }
+    val selectedCollections = if (reportPeriod == "monthly") monthTotal else yearlyTotal
+    val selectedExpenses = if (reportPeriod == "monthly") monthlyExpenses else annualExpenses
+    val netMovement = selectedCollections - selectedExpenses
+    val expected = activeCount.toLong() * 10000L * if (reportPeriod == "monthly") 1L else 12L
+    val arrearsEstimate = (expected - selectedCollections).coerceAtLeast(0L)
+
+    val batchBreakdown = remember(payments, currentYear) {
+        payments.filter { it.syncStatus != "reversed" && it.periodYear == currentYear }
+            .groupBy { p -> if (p.periodMonth >= 7) "${p.periodYear}/${p.periodYear + 1}" else "${p.periodYear - 1}/${p.periodYear}" }
+            .mapValues { entry -> entry.value.sumOf { it.amountTzs } }
+>>>>>>> fef975d8d515490084c5c154ca0583aa3ec0c026
     }
 
     Column(modifier = modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(stringResource(R.string.reports_title), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        Text("Committee-ready financial and membership reports", color = MaterialTheme.colorScheme.onSurfaceVariant)
 
+<<<<<<< HEAD
         // View Selector Tabs (Monthly vs Annual vs Term)
         TabRow(selectedTabIndex = selectedReportType) {
             Tab(
@@ -1736,14 +1784,32 @@ private fun ReportsScreen(
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+=======
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            FilterChip(
+                selected = reportPeriod == "monthly",
+                onClick = { reportPeriod = "monthly" },
+                label = { Text("Monthly · $monthStr") },
+                modifier = Modifier.weight(1f)
+            )
+            FilterChip(
+                selected = reportPeriod == "annual",
+                onClick = { reportPeriod = "annual" },
+                label = { Text("Annual · $currentYear") },
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+>>>>>>> fef975d8d515490084c5c154ca0583aa3ec0c026
             OutlinedButton(onClick = onExport, modifier = Modifier.weight(1f)) {
                 Icon(Icons.Default.FileDownload, contentDescription = null)
                 Spacer(Modifier.width(4.dp))
                 Text(stringResource(R.string.export_csv), style = MaterialTheme.typography.labelSmall)
             }
-
             Button(
                 onClick = {
+<<<<<<< HEAD
                     val file = if (selectedReportType == 2) {
                         PdfGenerator.generateTermReportPdf(
                             context = context,
@@ -1789,20 +1855,41 @@ private fun ReportsScreen(
                             arrearsMembers = annualArrearsMembers
                         )
                     }
+=======
+                    val title = if (reportPeriod == "monthly") "Monthly Financial Report" else "Annual Financial Report"
+                    val periodLabel = if (reportPeriod == "monthly") monthStr else currentYear.toString()
+                    val file = PdfGenerator.generateReportPdf(
+                        context = context,
+                        reportTitle = title,
+                        monthTotal = monthTotal,
+                        yearlyTotal = yearlyTotal,
+                        expensesTotal = selectedExpenses,
+                        memberCount = memberCount,
+                        defaulters = defaulters,
+                        batchBreakdown = batchBreakdown,
+                        periodLabel = periodLabel,
+                        periodCollectionsTzs = selectedCollections
+                    )
+>>>>>>> fef975d8d515490084c5c154ca0583aa3ec0c026
                     PdfGenerator.viewPdf(context, file)
                 },
                 modifier = Modifier.weight(1f)
             ) {
                 Icon(Icons.Default.PictureAsPdf, contentDescription = null)
                 Spacer(Modifier.width(4.dp))
+<<<<<<< HEAD
                 Text(
                     if (selectedReportType == 2) stringResource(R.string.generate_landscape_pdf) else stringResource(R.string.generate_pdf_report),
                     style = MaterialTheme.typography.labelSmall
                 )
+=======
+                Text("Generate PDF", style = MaterialTheme.typography.labelSmall)
+>>>>>>> fef975d8d515490084c5c154ca0583aa3ec0c026
             }
         }
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+<<<<<<< HEAD
             if (selectedReportType == 2) {
                 item {
                     MetricCard("Term Contributions Grand Total ($termTitle $selectedYear)", money(grandTotalTerm), Modifier.fillMaxWidth())
@@ -1890,6 +1977,25 @@ private fun ReportsScreen(
                                             }
                                         }
                                     }
+=======
+            item { MetricCard("Collections for selected period", money(selectedCollections), Modifier.fillMaxWidth()) }
+            item { MetricCard("Approved / paid expenses for period", money(selectedExpenses), Modifier.fillMaxWidth()) }
+            item { MetricCard("Net movement (opening balance excluded)", money(netMovement), Modifier.fillMaxWidth()) }
+            item { MetricCard(if (reportPeriod == "monthly") "Expected contributions this month" else "Expected contributions this year", money(expected), Modifier.fillMaxWidth()) }
+            item { MetricCard("Estimated outstanding contributions", money(arrearsEstimate), Modifier.fillMaxWidth()) }
+            item { MetricCard("Registered members", memberCount.toString(), Modifier.fillMaxWidth()) }
+            item { MetricCard("Payment records (all periods)", paymentCount.toString(), Modifier.fillMaxWidth()) }
+
+            if (batchBreakdown.isNotEmpty()) {
+                item {
+                    Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+                        Column(Modifier.padding(14.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("Collections by batch (current year)", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                            batchBreakdown.toSortedMap().forEach { (batchLabel, collected) ->
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("Batch $batchLabel", fontWeight = FontWeight.SemiBold)
+                                    Text(money(collected), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+>>>>>>> fef975d8d515490084c5c154ca0583aa3ec0c026
                                 }
                             }
                         }
@@ -1912,6 +2018,7 @@ private fun ReportsScreen(
                     MetricCard(stringResource(R.string.outstanding_estimate), money(estimatedMonthlyArrears), Modifier.fillMaxWidth())
                 }
 
+<<<<<<< HEAD
                 if (monthlyBatchBreakdown.isNotEmpty()) {
                     item {
                         Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
@@ -1945,6 +2052,24 @@ private fun ReportsScreen(
                                             }) {
                                                 Icon(Icons.Default.Sms, contentDescription = "SMS", tint = MaterialTheme.colorScheme.primary)
                                             }
+=======
+            item {
+                Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                    Column(Modifier.padding(14.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Current-month arrears", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                        if (defaulters.isEmpty()) Text(stringResource(R.string.no_defaulters), color = MaterialTheme.colorScheme.primary)
+                        else {
+                            Text("${defaulters.size} active member(s) have no payment recorded for $monthStr.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                            defaulters.forEach { member ->
+                                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(member.fullName, fontWeight = FontWeight.SemiBold)
+                                        Text("${member.memberNo} · ${member.phone.ifBlank { "No phone recorded" }}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    if (member.phone.isNotBlank()) {
+                                        IconButton(onClick = { ReminderManager.sendSmsReminder(context, member.phone, member.fullName, monthStr) }) {
+                                            Icon(Icons.Default.Sms, contentDescription = "SMS reminder", tint = MaterialTheme.colorScheme.primary)
+>>>>>>> fef975d8d515490084c5c154ca0583aa3ec0c026
                                         }
                                     }
                                 }

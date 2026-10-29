@@ -52,6 +52,7 @@ Individual member statements generated from profile dialogs feature:
 - Clear identification and exclusion of `REVERSED` payments from totals.
 - Multi-page support with repeated headers and footer page numbering.
 
+<<<<<<< HEAD
 ## 5. Financial Safeguards & Principles
 - **Net Movement**: Calculated strictly as `Collections - Approved Expenses`.
 - **Expense Exclusion**: Pending and rejected expenses are excluded from financial totals.
@@ -78,3 +79,28 @@ Individual member statements generated from profile dialogs feature:
 3. **Member Statement PDF**: Open a member's profile and export PDF statement. Verify all historical payment records are displayed without truncation.
 4. **CSV Import/Export**: Import a member register CSV and export backup CSV from the Reports tab.
 5. **Database Persistence**: Restart the app and confirm local Room records survive app restarts.
+=======
+## Limitations
+- Local-only means one device is the authoritative copy. No live sharing, cloud backup, remote login, or synchronization.
+- Local payment reversal marks a payment as reversed for local totals; it is not a bank/mobile-money refund. Keep evidence and audit records outside the app if required by club policy.
+- Before production use, test database migration, import/export, balances, and restore from a CSV backup.
+
+
+## Committee reports (monthly and annual)
+- The Reports tab provides monthly and annual views based on local Room records.
+- Collections use the contribution period (payment month/year); expenses marked `paid` or `approved` are grouped by their recorded date.
+- Financial report PDFs include the selected period, TZS summaries, batch collections, current-month arrears, generation timestamp, page numbers, and committee preparation/review/approval lines.
+- Member statements now paginate through all payment records instead of stopping after 25 rows. Long arrears lists paginate instead of being silently limited to 15 names.
+- “Net movement” means collections less included expenses. It is **not** a closing cash balance because the report does not capture a verified opening balance. Reconcile it against cashbook, bank, and mobile-money records before committee approval.
+- Expected contribution estimates assume TZS 10,000 per active member per month (12 months for the annual view). Confirm this against the club's approved rules before relying on arrears estimates.
+
+
+## Build and test the report upgrade
+1. Open the repository in Android Studio with JDK 17 and Android SDK 35 installed.
+2. Sync the Gradle project.
+3. Run **Build → Make Project** and then **Build → Build Bundle(s) / APK(s) → Build APK(s)**.
+4. Run **Run → Edit Configurations** and launch the app on an emulator/device with sample members, payments across multiple months, and both paid and pending expenses.
+5. In Reports, switch between Monthly and Annual. Verify monthly totals use contribution month/year, annual totals use contribution year, and only paid/approved expenses are included.
+6. Generate both financial PDFs and a member statement. Confirm headers/page numbers appear on every page and that statements with more than 25 payments and arrears lists with more than 15 members retain all rows.
+7. Run **Build → Select Build Variant → debug**, then **Run → Run 'app'**. If a Gradle installation is available in a terminal, use `gradle testDebugUnitTest` and `gradle assembleDebug`; this repository currently does not include a Gradle wrapper.
+>>>>>>> fef975d8d515490084c5c154ca0583aa3ec0c026
