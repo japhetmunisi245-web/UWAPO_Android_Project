@@ -1054,8 +1054,10 @@ private fun Step2SelectPeriodView(
         LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             items(ContributionPeriod.entries.toTypedArray(), key = { it.name }) { period ->
                 val targetYear = period.getYear(batchYear)
+                val batchMemberIds = members.map { it.id }.toSet()
                 val termPayments = payments.filter {
                     it.syncStatus != "reversed" &&
+                    it.memberId in batchMemberIds &&
                     it.periodYear == targetYear &&
                     it.periodMonth in period.monthRange
                 }
@@ -1147,9 +1149,11 @@ private fun Step3PeriodDetailsView(
     val targetYear = remember(batchYear, period) { period.getYear(batchYear) }
     val requiredPerTerm = 60000L
 
-    val termPayments = remember(payments, targetYear, period) {
+    val termPayments = remember(payments, members, targetYear, period) {
+        val batchMemberIds = members.map { it.id }.toSet()
         payments.filter {
             it.syncStatus != "reversed" &&
+            it.memberId in batchMemberIds &&
             it.periodYear == targetYear &&
             it.periodMonth in period.monthRange
         }

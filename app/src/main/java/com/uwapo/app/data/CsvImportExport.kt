@@ -165,6 +165,8 @@ object CsvImportExport {
 
     private suspend fun importMatrixLedger(sheets: List<List<List<String>>>, dao: UWAPODao, targetStartYear: Int? = null): ImportResult {
         val year = targetStartYear ?: detectYear(sheets)
+        // Re-importing the same ledger must replace earlier imported payments, never add on top of them.
+        dao.deleteImportedPaymentsForYear(year)
         val existingMembers = dao.getMembersForBatchSync(year).toMutableList()
         var membersAdded = 0
         var paymentsAdded = 0

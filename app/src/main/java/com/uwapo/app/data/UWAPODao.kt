@@ -44,6 +44,9 @@ interface UWAPODao {
     suspend fun insertPayment(payment: PaymentEntity)
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertPaymentIgnore(payment: PaymentEntity): Long
+    /** Removes payments created by earlier spreadsheet imports for a year, so re-importing replaces them instead of adding on top. */
+    @Query("DELETE FROM payments WHERE periodYear = :year AND receiptNo LIKE 'IMPORT-%'")
+    suspend fun deleteImportedPaymentsForYear(year: Int)
     @Upsert
     suspend fun upsertMember(member: MemberEntity)
     @Upsert

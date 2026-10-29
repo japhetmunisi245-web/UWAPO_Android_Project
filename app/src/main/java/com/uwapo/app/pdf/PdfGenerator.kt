@@ -521,6 +521,10 @@ object PdfGenerator {
         val totalAmount: Long
     )
 
+    /**
+     * Simple ledger-style term report (A4 portrait): title header, then a bordered table
+     * "JINA | month ADA x6 | JUMLA", one row per member, and a TOTAL row at the end.
+     */
     fun generateTermReportPdf(
         context: Context,
         termTitle: String,
@@ -532,161 +536,116 @@ object PdfGenerator {
     ): File {
         val document = PdfDocument()
         val paint = Paint().apply { isAntiAlias = true }
+        val numFormat = NumberFormat.getIntegerInstance(Locale.US).apply { isGroupingUsed = false }
 
-        val pageWidth = 842
-        val pageHeight = 595
-        val marginLeft = 30f
-        val marginRight = 812f
-        val marginBottom = 520f
+        val pageWidth = 595
+        val pageHeight = 842
+        val left = 30f
+        val nameW = 175f
+        val monthW = 52f
+        val totalW = 48f
+        val right = left + nameW + monthW * 6 + totalW
+        val rowH = 15f
+        val bottomLimit = pageHeight - 40f
 
-        var pageIndex = 1
-        var pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageIndex).create()
-        var page = document.startPage(pageInfo)
-        var canvas = page.canvas
+        // Column x positions (left edges)
+        val monthX = List(6) { left + nameW + monthW * it }
+        val totalX = left + nameW + monthW * 6
 
-        fun drawHeaderBanner(c: android.graphics.Canvas, pIndex: Int) {
-            paint.color = Color.parseColor("#17365D")
-            c.drawRect(0f, 0f, pageWidth.toFloat(), 75f, paint)
+        var pageIndex = 0
+        var page: PdfDocument.Page? = null
+        var canvas: android.graphics.Canvas? = null
+        var y = 0f
 
-            paint.color = Color.WHITE
-            paint.textSize = 20f
+        fun centered(c: android.graphics.Canvas, text: String, x: Float, w: Float, baseline: Float) {
+            c.drawText(text, x + (w - paint.measureText(text)) / 2f, baseline, paint)
+        }
+
+        fun rightAligned(c: android.graphics.Canvas, text: String, x: Float, w: Float, baseline: Float) {
+            c.drawText(text, x + w - 4f - paint.measureText(text), baseline, paint)
+        }
+
+        fun line(c: android.graphics.Canvas, x1: Float, y1: Float, x2: Float, y2: Float, width: Float = 0.7f) {
+            paint.color = Color.BLACK
+            paint.strokeWidth = width
+            c.drawLine(x1, y1, x2, y2, paint)
+        }
+
+        // Grid for one table row: outer box plus vertical dividers.
+        fun rowBox(c: android.graphics.Canvas, top: Float) {
+            val bottom = top + rowH
+            line(c, left, top, right, top)
+            line(c, left, bottom, right, bottom)
+            line(c, left, top, left, bottom)
+            line(c, right, top, right, bottom)
+            line(c, left + nameW, top, left + nameW, bottom)
+            monthX.forEach { x -> line(c, x + monthW, top, x + monthW, bottom) }
+        }
+
+        fun startPage(): android.graphics.Canvas {
+            page?.let { document.finishPage(it) }
+            pageIndex++
+            val info = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageIndex).create()
+            val pg = document.startPage(info)
+            page = pg
+            val c = pg.canvas
+            canvas = c
+
+            // Title header
+            paint.color = Color.BLACK
             paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            c.drawText("UWAPO MEMBERSHIP CLUB", marginLeft, 36f, paint)
-
+            paint.textSize = 16f
+            centered(c, "UWAPO — MICHANGO $year", left, right - left, 46f)
             paint.textSize = 12f
-            paint.typeface = Typeface.DEFAULT
-            c.drawText("MEMBER CONTRIBUTIONS REPORT — $termTitle $year (A4 Landscape)", marginLeft, 58f, paint)
+            centered(c, termTitle.uppercase(Locale.ROOT), left, right - left, 64f)
 
-            val dateStr = SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault()).format(Date())
+            // Table header: row 1 = month names, row 2 = JINA / ADA x6 / JUMLA
+            var top = 80f
             paint.textSize = 9f
-            c.drawText("Generated: $dateStr · Page $pIndex", 600f, 58f, paint)
-        }
-
-        fun drawTableHeader(c: android.graphics.Canvas, topY: Float) {
-            paint.color = Color.parseColor("#17365D")
-            c.drawRect(marginLeft, topY, marginRight, topY + 24f, paint)
-
-            paint.color = Color.WHITE
-            paint.textSize = 9.5f
             paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-
-            c.drawText("NO.", 35f, topY + 16f, paint)
-            c.drawText("FULL NAME & MEMBER NO", 70f, topY + 16f, paint)
-
-            val monthColX = listOf(275f, 340f, 405f, 470f, 535f, 600f)
-            monthLabels.take(6).forEachIndexed { idx, label ->
-                if (idx < monthColX.size) {
-                    c.drawText(label.uppercase(Locale.ROOT), monthColX[idx], topY + 16f, paint)
-                }
-            }
-
-            c.drawText("TOTAL (TZS)", 670f, topY + 16f, paint)
+            rowBox(c, top)
+            monthLabels.take(6).forEachIndexed { i, label -> centered(c, label.uppercase(Locale.ROOT), monthX[i], monthW, top + 11f) }
+            top += rowH
+            rowBox(c, top)
+            centered(c, "JINA", left, nameW, top + 11f)
+            monthX.forEach { x -> centered(c, "ADA", x, monthW, top + 11f) }
+            centered(c, "JUMLA", totalX, totalW, top + 11f)
+            y = top + rowH
+            return c
         }
 
-        fun drawFooter(c: android.graphics.Canvas, pIndex: Int) {
-            paint.color = Color.LTGRAY
-            paint.strokeWidth = 1f
-            c.drawLine(marginLeft, 540f, marginRight, 540f, paint)
-
-            paint.color = Color.DKGRAY
-            paint.textSize = 9f
-            paint.typeface = Typeface.DEFAULT
-            c.drawText("UWAPO Management System · Official Term Contribution Report", marginLeft, 555f, paint)
-            c.drawText("Page $pIndex", 750f, 555f, paint)
-        }
-
-        drawHeaderBanner(canvas, pageIndex)
-
-        var y = 90f
-        drawTableHeader(canvas, y)
-        y += 24f
-
-        val monthColX = listOf(275f, 340f, 405f, 470f, 535f, 600f)
-        val numFormat = NumberFormat.getIntegerInstance(Locale("en", "TZ"))
+        var c = startPage()
 
         memberRows.forEachIndexed { idx, row ->
-            if (y > marginBottom) {
-                drawFooter(canvas, pageIndex)
-                document.finishPage(page)
-
-                pageIndex++
-                pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageIndex).create()
-                page = document.startPage(pageInfo)
-                canvas = page.canvas
-
-                drawHeaderBanner(canvas, pageIndex)
-                y = 90f
-                drawTableHeader(canvas, y)
-                y += 24f
-            }
-
-            y += 18f
-
-            if (idx % 2 == 1) {
-                paint.color = Color.parseColor("#F9FAFC")
-                canvas.drawRect(marginLeft, y - 14f, marginRight, y + 4f, paint)
-            }
-
+            if (y + rowH > bottomLimit) c = startPage()
+            rowBox(c, y)
             paint.color = Color.BLACK
             paint.textSize = 9f
-            paint.typeface = Typeface.DEFAULT
-
-            canvas.drawText("${idx + 1}", 35f, y, paint)
-
-            val displayName = "${row.fullName} (${row.memberNo})"
-            val truncatedName = if (displayName.length > 32) displayName.take(30) + ".." else displayName
-            canvas.drawText(truncatedName, 70f, y, paint)
-
-            row.monthlyAmounts.take(6).forEachIndexed { mIdx, amt ->
-                if (mIdx < monthColX.size) {
-                    val txt = if (amt <= 0) "-" else numFormat.format(amt)
-                    canvas.drawText(txt, monthColX[mIdx], y, paint)
-                }
-            }
-
             paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            val totalTxt = if (row.totalAmount <= 0) "0" else numFormat.format(row.totalAmount)
-            canvas.drawText(totalTxt, 670f, y, paint)
+            val label = "${idx + 1}.${row.fullName}"
+            var shown = label
+            while (shown.length > 4 && paint.measureText(shown) > nameW - 6f) shown = shown.dropLast(1)
+            c.drawText(shown, left + 3f, y + 11f, paint)
 
-            paint.color = Color.LTGRAY
-            paint.strokeWidth = 0.5f
-            canvas.drawLine(marginLeft, y + 4f, marginRight, y + 4f, paint)
-        }
-
-        y += 22f
-        if (y > marginBottom) {
-            drawFooter(canvas, pageIndex)
-            document.finishPage(page)
-
-            pageIndex++
-            pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageIndex).create()
-            page = document.startPage(pageInfo)
-            canvas = page.canvas
-
-            drawHeaderBanner(canvas, pageIndex)
-            y = 110f
-        }
-
-        paint.color = Color.parseColor("#E8EEF5")
-        canvas.drawRect(marginLeft, y - 14f, marginRight, y + 8f, paint)
-
-        paint.color = Color.parseColor("#17365D")
-        paint.textSize = 10f
-        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        canvas.drawText("GRAND TOTAL (TZS)", 70f, y, paint)
-
-        grandTotalMonthly.take(6).forEachIndexed { mIdx, sumAmt ->
-            if (mIdx < monthColX.size) {
-                val txt = if (sumAmt <= 0) "0" else numFormat.format(sumAmt)
-                canvas.drawText(txt, monthColX[mIdx], y, paint)
+            paint.typeface = Typeface.DEFAULT
+            row.monthlyAmounts.take(6).forEachIndexed { m, amt ->
+                if (amt > 0) centered(c, numFormat.format(amt), monthX[m], monthW, y + 11f)
             }
+            centered(c, numFormat.format(row.totalAmount.coerceAtLeast(0L)), totalX, totalW, y + 11f)
+            y += rowH
         }
 
-        val grandTotalTxt = money(grandTotalTerm)
-        canvas.drawText(grandTotalTxt, 670f, y, paint)
+        // TOTAL row (grand total in the JUMLA column, like the ledger)
+        if (y + rowH > bottomLimit) c = startPage()
+        rowBox(c, y)
+        paint.color = Color.BLACK
+        paint.textSize = 9.5f
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        c.drawText("TOTAL", left + 3f, y + 11f, paint)
+        // Only the JUMLA column carries a total; month cells stay empty.
+        centered(c, numFormat.format(grandTotalTerm), totalX, totalW, y + 11f)
 
-        drawFooter(canvas, pageIndex)
-        document.finishPage(page)
+        page?.let { document.finishPage(it) }
 
         val file = File(context.cacheDir, "term_report_${year}_${termTitle.take(6).lowercase().replace(' ', '_')}_${System.currentTimeMillis()}.pdf")
         FileOutputStream(file).use { out -> document.writeTo(out) }

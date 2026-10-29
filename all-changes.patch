@@ -1,0 +1,507 @@
+diff --git a/app/src/main/java/com/uwapo/app/data/CsvImportExport.kt b/app/src/main/java/com/uwapo/app/data/CsvImportExport.kt
+index 6d2f586..386cd35 100644
+--- a/app/src/main/java/com/uwapo/app/data/CsvImportExport.kt
++++ b/app/src/main/java/com/uwapo/app/data/CsvImportExport.kt
+@@ -83,6 +83,33 @@ object CsvImportExport {
+             .lowercase(Locale.ROOT)
+     }
+ 
++    private fun editDistance(a: String, b: String): Int {
++        val dp = IntArray(b.length + 1) { it }
++        for (i in 1..a.length) {
++            var prev = dp[0]
++            dp[0] = i
++            for (j in 1..b.length) {
++                val tmp = dp[j]
++                dp[j] = minOf(dp[j] + 1, dp[j - 1] + 1, prev + if (a[i - 1] == b[j - 1]) 0 else 1)
++                prev = tmp
++            }
++        }
++        return dp[b.length]
++    }
++
++    /** Same person written slightly differently (typos like MARUA/MARUWA, or a middle name shortened to an initial). */
++    private fun namesLikelySame(a: String, b: String): Boolean {
++        if (a.length >= 8 && b.length >= 8 && editDistance(a, b) <= 2) return true
++        val ta = a.split(" ").filter { it.isNotBlank() }
++        val tb = b.split(" ").filter { it.isNotBlank() }
++        if (ta.size < 2 || tb.size < 2 || ta.size == tb.size && ta == tb) return ta == tb
++        if (ta.first() != tb.first() || ta.last() != tb.last()) return false
++        val midA = ta.drop(1).dropLast(1)
++        val midB = tb.drop(1).dropLast(1)
++        val (short, long) = if (midA.size <= midB.size) midA to midB else midB to midA
++        return short.all { sm -> long.any { lm -> lm.startsWith(sm) || sm.startsWith(lm) } }
++    }
++
+     private suspend fun findOrRegisterMember(
+         existingMembers: MutableList<MemberEntity>,
+         num: String,
+@@ -97,9 +124,12 @@ object CsvImportExport {
+         val normName = normalizeMemberName(fullName)
+         val matchedByName = if (normName.isNotBlank()) {
+             existingMembers.find { normalizeMemberName(it.fullName) == normName }
++                ?: existingMembers.find { namesLikelySame(normalizeMemberName(it.fullName), normName) }
+         } else null
+ 
+-        val matchedByNum = if (matchedByName == null && num.isNotBlank()) {
++        // Member numbers are NOT stable between sheets (Term 2 is numbered differently from Term 1),
++        // so a number is only used to match when the row has no name at all.
++        val matchedByNum = if (matchedByName == null && normName.isBlank() && num.isNotBlank()) {
+             existingMembers.find { it.memberNo == num }
+         } else null
+ 
+@@ -108,7 +138,11 @@ object CsvImportExport {
+             return Pair(matched, false)
+         }
+ 
+-        val memberNo = num.ifBlank { fullName.replace(" ", "_").take(15) }
++        var memberNo = num.ifBlank { fullName.replace(" ", "_").take(15) }
++        if (existingMembers.any { it.memberNo == memberNo }) {
++            val maxNo = existingMembers.mapNotNull { it.memberNo.toIntOrNull() }.maxOrNull() ?: 0
++            memberNo = (maxNo + 1).toString()
++        }
+         val memberId = UUID.nameUUIDFromBytes("UWAPO-MEMBER:$year:$memberNo".toByteArray(Charsets.UTF_8)).toString()
+         val joinDate = LocalDate.of(year, 7, 1)
+         val newMember = MemberEntity(
+@@ -131,6 +165,8 @@ object CsvImportExport {
+ 
+     private suspend fun importMatrixLedger(sheets: List<List<List<String>>>, dao: UWAPODao, targetStartYear: Int? = null): ImportResult {
+         val year = targetStartYear ?: detectYear(sheets)
++        // Re-importing the same ledger must replace earlier imported payments, never add on top of them.
++        dao.deleteImportedPaymentsForYear(year)
+         val existingMembers = dao.getMembersForBatchSync(year).toMutableList()
+         var membersAdded = 0
+         var paymentsAdded = 0
+@@ -147,17 +183,13 @@ object CsvImportExport {
+                 }
+             }
+ 
++            // Only columns whose header is a month name are payments. Never guess extra columns:
++            // the "JUMLA ADA" / "JUMLA" column is the row total and was previously imported as May/December.
+             val monthCols = detectedCols.toMutableMap()
+-            if (sheetIdx == 0) {
+-                val defaultTerm1Map = mapOf(3 to 1, 4 to 2, 5 to 3, 6 to 4, 7 to 5, 2 to 6)
+-                for ((c, m) in defaultTerm1Map) {
+-                    if (c !in monthCols) monthCols[c] = m
+-                }
+-            } else if (sheetIdx == 1) {
+-                val defaultTerm2Map = mapOf(2 to 7, 3 to 8, 4 to 9, 5 to 10, 6 to 11, 7 to 12)
+-                for ((c, m) in defaultTerm2Map) {
+-                    if (c !in monthCols) monthCols[c] = m
+-                }
++            if (monthCols.isEmpty()) {
++                val fallback = if (sheetIdx == 0) mapOf(1 to 1, 2 to 2, 3 to 3, 4 to 4, 5 to 5, 6 to 6)
++                else mapOf(1 to 7, 2 to 8, 3 to 9, 4 to 10, 5 to 11, 6 to 12)
++                monthCols.putAll(fallback)
+             }
+ 
+             if (monthCols.isEmpty()) continue
+diff --git a/app/src/main/java/com/uwapo/app/data/UWAPODao.kt b/app/src/main/java/com/uwapo/app/data/UWAPODao.kt
+index ab22aa7..9c4b05f 100644
+--- a/app/src/main/java/com/uwapo/app/data/UWAPODao.kt
++++ b/app/src/main/java/com/uwapo/app/data/UWAPODao.kt
+@@ -44,6 +44,9 @@ interface UWAPODao {
+     suspend fun insertPayment(payment: PaymentEntity)
+     @Insert(onConflict = OnConflictStrategy.IGNORE)
+     suspend fun insertPaymentIgnore(payment: PaymentEntity): Long
++    /** Removes payments created by earlier spreadsheet imports for a year, so re-importing replaces them instead of adding on top. */
++    @Query("DELETE FROM payments WHERE periodYear = :year AND receiptNo LIKE 'IMPORT-%'")
++    suspend fun deleteImportedPaymentsForYear(year: Int)
+     @Upsert
+     suspend fun upsertMember(member: MemberEntity)
+     @Upsert
+diff --git a/app/src/main/java/com/uwapo/app/pdf/PdfGenerator.kt b/app/src/main/java/com/uwapo/app/pdf/PdfGenerator.kt
+index 5ddc80f..6932e21 100644
+--- a/app/src/main/java/com/uwapo/app/pdf/PdfGenerator.kt
++++ b/app/src/main/java/com/uwapo/app/pdf/PdfGenerator.kt
+@@ -521,6 +521,10 @@ object PdfGenerator {
+         val totalAmount: Long
+     )
+ 
++    /**
++     * Simple ledger-style term report (A4 portrait): title header, then a bordered table
++     * "JINA | month ADA x6 | JUMLA", one row per member, and a TOTAL row at the end.
++     */
+     fun generateTermReportPdf(
+         context: Context,
+         termTitle: String,
+@@ -532,161 +536,116 @@ object PdfGenerator {
+     ): File {
+         val document = PdfDocument()
+         val paint = Paint().apply { isAntiAlias = true }
++        val numFormat = NumberFormat.getIntegerInstance(Locale.US).apply { isGroupingUsed = false }
++
++        val pageWidth = 595
++        val pageHeight = 842
++        val left = 30f
++        val nameW = 175f
++        val monthW = 52f
++        val totalW = 48f
++        val right = left + nameW + monthW * 6 + totalW
++        val rowH = 15f
++        val bottomLimit = pageHeight - 40f
++
++        // Column x positions (left edges)
++        val monthX = List(6) { left + nameW + monthW * it }
++        val totalX = left + nameW + monthW * 6
++
++        var pageIndex = 0
++        var page: PdfDocument.Page? = null
++        var canvas: android.graphics.Canvas? = null
++        var y = 0f
++
++        fun centered(c: android.graphics.Canvas, text: String, x: Float, w: Float, baseline: Float) {
++            c.drawText(text, x + (w - paint.measureText(text)) / 2f, baseline, paint)
++        }
+ 
+-        val pageWidth = 842
+-        val pageHeight = 595
+-        val marginLeft = 30f
+-        val marginRight = 812f
+-        val marginBottom = 520f
+-
+-        var pageIndex = 1
+-        var pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageIndex).create()
+-        var page = document.startPage(pageInfo)
+-        var canvas = page.canvas
+-
+-        fun drawHeaderBanner(c: android.graphics.Canvas, pIndex: Int) {
+-            paint.color = Color.parseColor("#17365D")
+-            c.drawRect(0f, 0f, pageWidth.toFloat(), 75f, paint)
+-
+-            paint.color = Color.WHITE
+-            paint.textSize = 20f
+-            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+-            c.drawText("UWAPO MEMBERSHIP CLUB", marginLeft, 36f, paint)
++        fun rightAligned(c: android.graphics.Canvas, text: String, x: Float, w: Float, baseline: Float) {
++            c.drawText(text, x + w - 4f - paint.measureText(text), baseline, paint)
++        }
+ 
+-            paint.textSize = 12f
+-            paint.typeface = Typeface.DEFAULT
+-            c.drawText("MEMBER CONTRIBUTIONS REPORT — $termTitle $year (A4 Landscape)", marginLeft, 58f, paint)
++        fun line(c: android.graphics.Canvas, x1: Float, y1: Float, x2: Float, y2: Float, width: Float = 0.7f) {
++            paint.color = Color.BLACK
++            paint.strokeWidth = width
++            c.drawLine(x1, y1, x2, y2, paint)
++        }
+ 
+-            val dateStr = SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault()).format(Date())
+-            paint.textSize = 9f
+-            c.drawText("Generated: $dateStr · Page $pIndex", 600f, 58f, paint)
++        // Grid for one table row: outer box plus vertical dividers.
++        fun rowBox(c: android.graphics.Canvas, top: Float) {
++            val bottom = top + rowH
++            line(c, left, top, right, top)
++            line(c, left, bottom, right, bottom)
++            line(c, left, top, left, bottom)
++            line(c, right, top, right, bottom)
++            line(c, left + nameW, top, left + nameW, bottom)
++            monthX.forEach { x -> line(c, x + monthW, top, x + monthW, bottom) }
+         }
+ 
+-        fun drawTableHeader(c: android.graphics.Canvas, topY: Float) {
+-            paint.color = Color.parseColor("#17365D")
+-            c.drawRect(marginLeft, topY, marginRight, topY + 24f, paint)
++        fun startPage(): android.graphics.Canvas {
++            page?.let { document.finishPage(it) }
++            pageIndex++
++            val info = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageIndex).create()
++            val pg = document.startPage(info)
++            page = pg
++            val c = pg.canvas
++            canvas = c
+ 
+-            paint.color = Color.WHITE
+-            paint.textSize = 9.5f
++            // Title header
++            paint.color = Color.BLACK
+             paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
++            paint.textSize = 16f
++            centered(c, "UWAPO — MICHANGO $year", left, right - left, 46f)
++            paint.textSize = 12f
++            centered(c, termTitle.uppercase(Locale.ROOT), left, right - left, 64f)
+ 
+-            c.drawText("NO.", 35f, topY + 16f, paint)
+-            c.drawText("FULL NAME & MEMBER NO", 70f, topY + 16f, paint)
+-
+-            val monthColX = listOf(275f, 340f, 405f, 470f, 535f, 600f)
+-            monthLabels.take(6).forEachIndexed { idx, label ->
+-                if (idx < monthColX.size) {
+-                    c.drawText(label.uppercase(Locale.ROOT), monthColX[idx], topY + 16f, paint)
+-                }
+-            }
+-
+-            c.drawText("TOTAL (TZS)", 670f, topY + 16f, paint)
+-        }
+-
+-        fun drawFooter(c: android.graphics.Canvas, pIndex: Int) {
+-            paint.color = Color.LTGRAY
+-            paint.strokeWidth = 1f
+-            c.drawLine(marginLeft, 540f, marginRight, 540f, paint)
+-
+-            paint.color = Color.DKGRAY
++            // Table header: row 1 = month names, row 2 = JINA / ADA x6 / JUMLA
++            var top = 80f
+             paint.textSize = 9f
+-            paint.typeface = Typeface.DEFAULT
+-            c.drawText("UWAPO Management System · Official Term Contribution Report", marginLeft, 555f, paint)
+-            c.drawText("Page $pIndex", 750f, 555f, paint)
++            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
++            rowBox(c, top)
++            monthLabels.take(6).forEachIndexed { i, label -> centered(c, label.uppercase(Locale.ROOT), monthX[i], monthW, top + 11f) }
++            top += rowH
++            rowBox(c, top)
++            centered(c, "JINA", left, nameW, top + 11f)
++            monthX.forEach { x -> centered(c, "ADA", x, monthW, top + 11f) }
++            centered(c, "JUMLA", totalX, totalW, top + 11f)
++            y = top + rowH
++            return c
+         }
+ 
+-        drawHeaderBanner(canvas, pageIndex)
+-
+-        var y = 90f
+-        drawTableHeader(canvas, y)
+-        y += 24f
+-
+-        val monthColX = listOf(275f, 340f, 405f, 470f, 535f, 600f)
+-        val numFormat = NumberFormat.getIntegerInstance(Locale("en", "TZ"))
++        var c = startPage()
+ 
+         memberRows.forEachIndexed { idx, row ->
+-            if (y > marginBottom) {
+-                drawFooter(canvas, pageIndex)
+-                document.finishPage(page)
+-
+-                pageIndex++
+-                pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageIndex).create()
+-                page = document.startPage(pageInfo)
+-                canvas = page.canvas
+-
+-                drawHeaderBanner(canvas, pageIndex)
+-                y = 90f
+-                drawTableHeader(canvas, y)
+-                y += 24f
+-            }
+-
+-            y += 18f
+-
+-            if (idx % 2 == 1) {
+-                paint.color = Color.parseColor("#F9FAFC")
+-                canvas.drawRect(marginLeft, y - 14f, marginRight, y + 4f, paint)
+-            }
+-
++            if (y + rowH > bottomLimit) c = startPage()
++            rowBox(c, y)
+             paint.color = Color.BLACK
+             paint.textSize = 9f
+-            paint.typeface = Typeface.DEFAULT
+-
+-            canvas.drawText("${idx + 1}", 35f, y, paint)
+-
+-            val displayName = "${row.fullName} (${row.memberNo})"
+-            val truncatedName = if (displayName.length > 32) displayName.take(30) + ".." else displayName
+-            canvas.drawText(truncatedName, 70f, y, paint)
+-
+-            row.monthlyAmounts.take(6).forEachIndexed { mIdx, amt ->
+-                if (mIdx < monthColX.size) {
+-                    val txt = if (amt <= 0) "-" else numFormat.format(amt)
+-                    canvas.drawText(txt, monthColX[mIdx], y, paint)
+-                }
+-            }
+-
+             paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+-            val totalTxt = if (row.totalAmount <= 0) "0" else numFormat.format(row.totalAmount)
+-            canvas.drawText(totalTxt, 670f, y, paint)
++            val label = "${idx + 1}.${row.fullName}"
++            var shown = label
++            while (shown.length > 4 && paint.measureText(shown) > nameW - 6f) shown = shown.dropLast(1)
++            c.drawText(shown, left + 3f, y + 11f, paint)
+ 
+-            paint.color = Color.LTGRAY
+-            paint.strokeWidth = 0.5f
+-            canvas.drawLine(marginLeft, y + 4f, marginRight, y + 4f, paint)
+-        }
+-
+-        y += 22f
+-        if (y > marginBottom) {
+-            drawFooter(canvas, pageIndex)
+-            document.finishPage(page)
+-
+-            pageIndex++
+-            pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageIndex).create()
+-            page = document.startPage(pageInfo)
+-            canvas = page.canvas
+-
+-            drawHeaderBanner(canvas, pageIndex)
+-            y = 110f
+-        }
+-
+-        paint.color = Color.parseColor("#E8EEF5")
+-        canvas.drawRect(marginLeft, y - 14f, marginRight, y + 8f, paint)
+-
+-        paint.color = Color.parseColor("#17365D")
+-        paint.textSize = 10f
+-        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+-        canvas.drawText("GRAND TOTAL (TZS)", 70f, y, paint)
+-
+-        grandTotalMonthly.take(6).forEachIndexed { mIdx, sumAmt ->
+-            if (mIdx < monthColX.size) {
+-                val txt = if (sumAmt <= 0) "0" else numFormat.format(sumAmt)
+-                canvas.drawText(txt, monthColX[mIdx], y, paint)
++            paint.typeface = Typeface.DEFAULT
++            row.monthlyAmounts.take(6).forEachIndexed { m, amt ->
++                if (amt > 0) centered(c, numFormat.format(amt), monthX[m], monthW, y + 11f)
+             }
++            centered(c, numFormat.format(row.totalAmount.coerceAtLeast(0L)), totalX, totalW, y + 11f)
++            y += rowH
+         }
+ 
+-        val grandTotalTxt = money(grandTotalTerm)
+-        canvas.drawText(grandTotalTxt, 670f, y, paint)
++        // TOTAL row (grand total in the JUMLA column, like the ledger)
++        if (y + rowH > bottomLimit) c = startPage()
++        rowBox(c, y)
++        paint.color = Color.BLACK
++        paint.textSize = 9.5f
++        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
++        c.drawText("TOTAL", left + 3f, y + 11f, paint)
++        // Only the JUMLA column carries a total; month cells stay empty.
++        centered(c, numFormat.format(grandTotalTerm), totalX, totalW, y + 11f)
+ 
+-        drawFooter(canvas, pageIndex)
+-        document.finishPage(page)
++        page?.let { document.finishPage(it) }
+ 
+         val file = File(context.cacheDir, "term_report_${year}_${termTitle.take(6).lowercase().replace(' ', '_')}_${System.currentTimeMillis()}.pdf")
+         FileOutputStream(file).use { out -> document.writeTo(out) }
+diff --git a/app/src/main/java/com/uwapo/app/ui/UWAPORoot.kt b/app/src/main/java/com/uwapo/app/ui/UWAPORoot.kt
+index 272e0f5..08d17f0 100644
+--- a/app/src/main/java/com/uwapo/app/ui/UWAPORoot.kt
++++ b/app/src/main/java/com/uwapo/app/ui/UWAPORoot.kt
+@@ -1054,8 +1054,10 @@ private fun Step2SelectPeriodView(
+         LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+             items(ContributionPeriod.entries.toTypedArray(), key = { it.name }) { period ->
+                 val targetYear = period.getYear(batchYear)
++                val batchMemberIds = members.map { it.id }.toSet()
+                 val termPayments = payments.filter {
+                     it.syncStatus != "reversed" &&
++                    it.memberId in batchMemberIds &&
+                     it.periodYear == targetYear &&
+                     it.periodMonth in period.monthRange
+                 }
+@@ -1147,9 +1149,11 @@ private fun Step3PeriodDetailsView(
+     val targetYear = remember(batchYear, period) { period.getYear(batchYear) }
+     val requiredPerTerm = 60000L
+ 
+-    val termPayments = remember(payments, targetYear, period) {
++    val termPayments = remember(payments, members, targetYear, period) {
++        val batchMemberIds = members.map { it.id }.toSet()
+         payments.filter {
+             it.syncStatus != "reversed" &&
++            it.memberId in batchMemberIds &&
+             it.periodYear == targetYear &&
+             it.periodMonth in period.monthRange
+         }
+diff --git a/app/src/test/java/com/uwapo/app/data/CsvImportExportTest.kt b/app/src/test/java/com/uwapo/app/data/CsvImportExportTest.kt
+index 66a5273..2ae3ac1 100644
+--- a/app/src/test/java/com/uwapo/app/data/CsvImportExportTest.kt
++++ b/app/src/test/java/com/uwapo/app/data/CsvImportExportTest.kt
+@@ -59,6 +59,9 @@ class CsvImportExportTest {
+             }
+         }
+         override suspend fun insertPayment(payment: PaymentEntity) { payments.add(payment) }
++        override suspend fun deleteImportedPaymentsForYear(year: Int) {
++            payments.removeAll { it.periodYear == year && it.receiptNo.startsWith("IMPORT-") }
++        }
+         override suspend fun insertPaymentIgnore(payment: PaymentEntity): Long {
+             payments.add(payment)
+             return 1L
+diff --git a/desktopApp/src/jvmMain/kotlin/com/uwapo/desktop/data/DesktopCsvImportExport.kt b/desktopApp/src/jvmMain/kotlin/com/uwapo/desktop/data/DesktopCsvImportExport.kt
+index bed0549..4f603ea 100644
+--- a/desktopApp/src/jvmMain/kotlin/com/uwapo/desktop/data/DesktopCsvImportExport.kt
++++ b/desktopApp/src/jvmMain/kotlin/com/uwapo/desktop/data/DesktopCsvImportExport.kt
+@@ -88,6 +88,33 @@ object DesktopCsvImportExport {
+             .lowercase(Locale.ROOT)
+     }
+ 
++    private fun editDistance(a: String, b: String): Int {
++        val dp = IntArray(b.length + 1) { it }
++        for (i in 1..a.length) {
++            var prev = dp[0]
++            dp[0] = i
++            for (j in 1..b.length) {
++                val tmp = dp[j]
++                dp[j] = minOf(dp[j] + 1, dp[j - 1] + 1, prev + if (a[i - 1] == b[j - 1]) 0 else 1)
++                prev = tmp
++            }
++        }
++        return dp[b.length]
++    }
++
++    /** Same person written slightly differently (typos like MARUA/MARUWA, or a middle name shortened to an initial). */
++    private fun namesLikelySame(a: String, b: String): Boolean {
++        if (a.length >= 8 && b.length >= 8 && editDistance(a, b) <= 2) return true
++        val ta = a.split(" ").filter { it.isNotBlank() }
++        val tb = b.split(" ").filter { it.isNotBlank() }
++        if (ta.size < 2 || tb.size < 2 || ta.size == tb.size && ta == tb) return ta == tb
++        if (ta.first() != tb.first() || ta.last() != tb.last()) return false
++        val midA = ta.drop(1).dropLast(1)
++        val midB = tb.drop(1).dropLast(1)
++        val (short, long) = if (midA.size <= midB.size) midA to midB else midB to midA
++        return short.all { sm -> long.any { lm -> lm.startsWith(sm) || sm.startsWith(lm) } }
++    }
++
+     private fun findOrRegisterMember(
+         existingMembers: MutableList<MemberEntity>,
+         num: String,
+@@ -100,9 +127,11 @@ object DesktopCsvImportExport {
+         val normName = normalizeMemberName(fullName)
+         val matchedByName = if (normName.isNotBlank()) {
+             existingMembers.find { normalizeMemberName(it.fullName) == normName }
++                ?: existingMembers.find { namesLikelySame(normalizeMemberName(it.fullName), normName) }
+         } else null
+ 
+-        val matchedByNum = if (matchedByName == null && num.isNotBlank()) {
++        // Member numbers differ between sheets, so only use them when the row has no name.
++        val matchedByNum = if (matchedByName == null && normName.isBlank() && num.isNotBlank()) {
+             existingMembers.find { it.memberNo == num }
+         } else null
+ 
+@@ -111,7 +140,11 @@ object DesktopCsvImportExport {
+             return Pair(matched, false)
+         }
+ 
+-        val memberNo = num.ifBlank { fullName.replace(" ", "_").take(15) }
++        var memberNo = num.ifBlank { fullName.replace(" ", "_").take(15) }
++        if (existingMembers.any { it.memberNo == memberNo }) {
++            val maxNo = existingMembers.mapNotNull { it.memberNo.toIntOrNull() }.maxOrNull() ?: 0
++            memberNo = (maxNo + 1).toString()
++        }
+         val memberId = UUID.nameUUIDFromBytes("UWAPO-MEMBER:$memberNo".toByteArray(Charsets.UTF_8)).toString()
+         val joinDate = LocalDate.of(year, 7, 1)
+         val newMember = MemberEntity(
+@@ -148,17 +181,12 @@ object DesktopCsvImportExport {
+                 }
+             }
+ 
++            // Only month-header columns are payments; the JUMLA (total) column must never be read as a month.
+             val monthCols = detectedCols.toMutableMap()
+-            if (sheetIdx == 0) {
+-                val defaultTerm1Map = mapOf(3 to 1, 4 to 2, 5 to 3, 6 to 4, 7 to 5, 2 to 6)
+-                for ((c, m) in defaultTerm1Map) {
+-                    if (c !in monthCols) monthCols[c] = m
+-                }
+-            } else if (sheetIdx == 1) {
+-                val defaultTerm2Map = mapOf(2 to 7, 3 to 8, 4 to 9, 5 to 10, 6 to 11, 7 to 12)
+-                for ((c, m) in defaultTerm2Map) {
+-                    if (c !in monthCols) monthCols[c] = m
+-                }
++            if (monthCols.isEmpty()) {
++                val fallback = if (sheetIdx == 0) mapOf(1 to 1, 2 to 2, 3 to 3, 4 to 4, 5 to 5, 6 to 6)
++                else mapOf(1 to 7, 2 to 8, 3 to 9, 4 to 10, 5 to 11, 6 to 12)
++                monthCols.putAll(fallback)
+             }
+ 
+             if (monthCols.isEmpty()) continue

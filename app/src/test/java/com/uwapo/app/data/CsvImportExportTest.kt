@@ -59,6 +59,9 @@ class CsvImportExportTest {
             }
         }
         override suspend fun insertPayment(payment: PaymentEntity) { payments.add(payment) }
+        override suspend fun deleteImportedPaymentsForYear(year: Int) {
+            payments.removeAll { it.periodYear == year && it.receiptNo.startsWith("IMPORT-") }
+        }
         override suspend fun insertPaymentIgnore(payment: PaymentEntity): Long {
             payments.add(payment)
             return 1L

@@ -347,8 +347,9 @@ private fun DesktopMembersView(
                 }
 
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    val batchMemberIds = members.map { it.id }.toSet()
                     ContributionPeriod.entries.forEach { period ->
-                        val termPayments = payments.filter { it.syncStatus != "reversed" && it.periodYear == selectedBatchYear && it.periodMonth in period.monthRange }
+                        val termPayments = payments.filter { it.syncStatus != "reversed" && it.memberId in batchMemberIds && it.periodYear == selectedBatchYear && it.periodMonth in period.monthRange }
                         val collected = termPayments.sumOf { it.amountTzs }
 
                         Card(
@@ -368,7 +369,8 @@ private fun DesktopMembersView(
             } else {
                 // Period Details View
                 val period = selectedPeriod!!
-                val termPayments = payments.filter { it.syncStatus != "reversed" && it.periodYear == selectedBatchYear && it.periodMonth in period.monthRange }
+                val batchMemberIds = members.map { it.id }.toSet()
+                val termPayments = payments.filter { it.syncStatus != "reversed" && it.memberId in batchMemberIds && it.periodYear == selectedBatchYear && it.periodMonth in period.monthRange }
 
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = { selectedPeriod = null }) { Icon(Icons.Default.ArrowBack, contentDescription = "Back") }
