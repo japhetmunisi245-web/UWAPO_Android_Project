@@ -16,7 +16,7 @@ dependencies {
     implementation(compose.materialIconsExtended)
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
-    implementation("org.xerial:sqlite-jdbc:3.54.1.0")
+    implementation("org.xerial:sqlite-jdbc:3.53.1.0")
     implementation("org.apache.pdfbox:pdfbox:3.0.8")
 }
 

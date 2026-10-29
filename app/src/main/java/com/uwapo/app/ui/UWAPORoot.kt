@@ -6,6 +6,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -47,6 +48,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.uwapo.app.R
+import com.uwapo.app.data.BatchEntity
 import com.uwapo.app.data.CsvImportExport
 import com.uwapo.app.data.ExpenseEntity
 import com.uwapo.app.data.MemberEntity
@@ -104,6 +106,7 @@ fun UWAPORoot(dao: UWAPODao) {
     }
 
     val members by dao.observeMembers().collectAsState(initial = emptyList())
+    val batches by dao.observeBatches().collectAsState(initial = emptyList())
     val payments by dao.observePayments().collectAsState(initial = emptyList())
     val expenses by dao.observeExpenses().collectAsState(initial = emptyList())
     val cal = remember { Calendar.getInstance() }
@@ -112,7 +115,7 @@ fun UWAPORoot(dao: UWAPODao) {
 
     val monthTotal by dao.observeMonthlyTotal(currentYear, currentMonth).collectAsState(initial = 0L)
     val yearlyTotal by dao.observeYearlyTotal(currentYear).collectAsState(initial = 0L)
-    val activeCount by dao.observeActiveMemberCount().collectAsState(initial = 0)
+    val activeCount by dao.observeActiveMemberCount(currentYear).collectAsState(initial = 0)
     val lifetimeTotal by dao.observeLifetimeTotal().collectAsState(initial = 0L)
     val expensesTotal by dao.observePaidExpensesTotal().collectAsState(initial = 0L)
 
@@ -128,6 +131,8 @@ fun UWAPORoot(dao: UWAPODao) {
 
     var batchToImport by remember { mutableStateOf<BatchYear?>(null) }
     var activeBatchForAddMember by remember { mutableStateOf<BatchYear?>(null) }
+    // The batch the user is currently looking at on the Members tab (null on the batch list).
+    var activeBatchContext by remember { mutableStateOf<BatchYear?>(null) }
 
     var selectedMemberForProfile by remember { mutableStateOf<MemberEntity?>(null) }
     var selectedPaymentForReceipt by remember { mutableStateOf<PaymentEntity?>(null) }
@@ -140,7 +145,7 @@ fun UWAPORoot(dao: UWAPODao) {
             .map { it.memberId }.toSet()
     }
     val defaulters = remember(members, currentPaidMemberIds) {
-        members.filter { it.status == "active" && it.id !in currentPaidMemberIds }
+        members.filter { it.batchYear == currentYear && it.status == "active" && it.id !in currentPaidMemberIds }
     }
 
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -256,7 +261,7 @@ fun UWAPORoot(dao: UWAPODao) {
         },
         floatingActionButton = {
             when (selectedTab) {
-                Tab.MEMBERS -> FloatingActionButton(onClick = { showAddMember = true }) { Icon(Icons.Default.Add, contentDescription = stringResource(R.string.add_member)) }
+                Tab.MEMBERS -> FloatingActionButton(onClick = { activeBatchForAddMember = activeBatchContext; showAddMember = true }) { Icon(Icons.Default.Add, contentDescription = stringResource(R.string.add_member)) }
                 Tab.FINANCE -> FloatingActionButton(onClick = { showExpense = true }) { Icon(Icons.Default.Add, contentDescription = stringResource(R.string.record_expense)) }
                 else -> Unit
             }
@@ -268,6 +273,16 @@ fun UWAPORoot(dao: UWAPODao) {
                 modifier = Modifier.padding(padding),
                 members = members,
                 payments = payments,
+                batches = batches,
+                onActiveBatchChanged = { activeBatchContext = it },
+                onAddBatch = { year -> scope.launch { dao.insertBatchIgnore(BatchEntity(year)) } },
+                onDeleteBatch = { year ->
+                    scope.launch {
+                        dao.deleteBatch(year)
+                        if (selectedMemberForProfile?.batchYear == year) selectedMemberForProfile = null
+                        Toast.makeText(context, "Batch $year deleted", Toast.LENGTH_SHORT).show()
+                    }
+                },
                 onImportBatchForYear = { batch ->
                     batchToImport = batch
                     batchImportLauncher.launch(
@@ -316,16 +331,11 @@ fun UWAPORoot(dao: UWAPODao) {
                 onDeleteExpense = { expenseToDelete = it }
             )
             Tab.REPORTS -> ReportsScreen(
-<<<<<<< HEAD
                 modifier = Modifier.padding(padding),
                 members = members,
                 payments = payments,
                 expenses = expenses,
                 onExport = { exportLauncher.launch("uwapo-report-${System.currentTimeMillis()}.csv") }
-=======
-                Modifier.padding(padding), monthTotal, yearlyTotal, members.size, activeCount, payments.size, defaulters, payments, expenses,
-                onExport = { exportLauncher.launch("uwapo-register-${System.currentTimeMillis()}.csv") }
->>>>>>> fef975d8d515490084c5c154ca0583aa3ec0c026
             )
         }
     }
@@ -335,10 +345,21 @@ fun UWAPORoot(dao: UWAPODao) {
             member = member,
             payments = payments,
             onDismiss = { selectedMemberForProfile = null },
-            onUpdateProfile = { phone, status, notes ->
+            onUpdateProfile = { memberNo, fullName, phone, status, notes ->
                 scope.launch {
-                    dao.updateMemberProfile(member.id, phone, status, notes)
-                    selectedMemberForProfile = null
+                    val no = memberNo.trim()
+                    val name = fullName.trim()
+                    val clash = members.any { it.id != member.id && it.batchYear == member.batchYear && it.memberNo == no }
+                    when {
+                        no.isBlank() || name.isBlank() ->
+                            Toast.makeText(context, context.getString(R.string.error_member_fields_required), Toast.LENGTH_SHORT).show()
+                        clash ->
+                            Toast.makeText(context, "Member number $no already exists in batch ${member.batchYear}", Toast.LENGTH_LONG).show()
+                        else -> {
+                            dao.updateMemberDetails(member.id, no, name, phone.trim(), status, notes)
+                            selectedMemberForProfile = null
+                        }
+                    }
                 }
             },
             onDeleteMember = { m ->
@@ -445,22 +466,30 @@ fun UWAPORoot(dao: UWAPODao) {
 
     if (showAddMember) {
         AddMemberDialog(
+            batchYears = batches.map { BatchYear(it.year) },
             initialBatchYear = activeBatchForAddMember,
             onDismiss = {
                 showAddMember = false
                 activeBatchForAddMember = null
             },
-            onSave = { number, name, phone, joinedAtTimestamp ->
+            onSave = { number, name, phone, batchYear ->
                 scope.launch {
+                    val no = number.trim()
+                    if (members.any { it.batchYear == batchYear.year && it.memberNo == no }) {
+                        Toast.makeText(context, "Member number $no already exists in batch ${batchYear.displayLabel}", Toast.LENGTH_LONG).show()
+                        return@launch
+                    }
                     try {
+                        dao.insertBatchIgnore(BatchEntity(batchYear.year))
                         dao.insertMember(
                             MemberEntity(
                                 UUID.randomUUID().toString(),
-                                number.trim(),
+                                no,
                                 name.trim(),
                                 phone.trim(),
-                                joinedAt = joinedAtTimestamp,
-                                syncStatus = "local"
+                                joinedAt = getBatchStartTimestamp(batchYear),
+                                syncStatus = "local",
+                                batchYear = batchYear.year
                             )
                         )
                         showAddMember = false
@@ -717,6 +746,10 @@ private fun MembersScreen(
     modifier: Modifier,
     members: List<MemberEntity>,
     payments: List<PaymentEntity>,
+    batches: List<BatchEntity>,
+    onActiveBatchChanged: (BatchYear?) -> Unit,
+    onAddBatch: (Int) -> Unit,
+    onDeleteBatch: (Int) -> Unit,
     onImportBatchForYear: (BatchYear) -> Unit,
     onAddMemberForBatch: (BatchYear) -> Unit,
     onSelectMember: (MemberEntity) -> Unit,
@@ -726,24 +759,29 @@ private fun MembersScreen(
     var selectedMainTab by rememberSaveable { mutableIntStateOf(0) } // 0 = Batches & Terms, 1 = All Members
     var navStep by remember { mutableStateOf<MembersNavStep>(MembersNavStep.SelectBatch) }
     var showAddBatchDialog by remember { mutableStateOf(false) }
+    var batchToDelete by remember { mutableStateOf<BatchYear?>(null) }
+    val context = LocalContext.current
 
-    val customBatchYears = remember { mutableStateListOf<BatchYear>() }
+    // Batches live in the database, so adding and deleting them is permanent.
+    val batchYears = remember(batches) { batches.map { BatchYear(it.year) }.sortedByDescending { it.year } }
 
-    val defaultBatchYears = remember(payments, customBatchYears.size) {
-        val base = mutableListOf(
-            BatchYear(2023),
-            BatchYear(2024),
-            BatchYear(2025),
-            BatchYear(2026),
-            BatchYear(2027)
-        )
-        payments.map { it.periodYear }.distinct().forEach { yr ->
-            if (base.none { it.year == yr }) {
-                base.add(BatchYear(yr))
-            }
+    // Tell the parent which batch is open so the "+" button registers members into it.
+    val openBatch: BatchYear? = if (selectedMainTab == 1) null else when (val s = navStep) {
+        is MembersNavStep.SelectBatch -> null
+        is MembersNavStep.SelectPeriod -> s.batchYear
+        is MembersNavStep.PeriodDetails -> s.batchYear
+    }
+    LaunchedEffect(openBatch) { onActiveBatchChanged(openBatch) }
+
+    // If the open batch disappears (deleted), fall back to the batch list.
+    LaunchedEffect(batchYears, navStep) {
+        val s = navStep
+        val open = when (s) {
+            is MembersNavStep.SelectBatch -> null
+            is MembersNavStep.SelectPeriod -> s.batchYear
+            is MembersNavStep.PeriodDetails -> s.batchYear
         }
-        base.addAll(customBatchYears)
-        base.distinctBy { it.year }.sortedByDescending { it.year }
+        if (open != null && batchYears.none { it.year == open.year }) navStep = MembersNavStep.SelectBatch
     }
 
     Column(modifier = modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 6.dp)) {
@@ -768,6 +806,7 @@ private fun MembersScreen(
         if (selectedMainTab == 1) {
             AllMembersDirectoryView(
                 members = members,
+                batchYears = batchYears,
                 onSelectMember = onSelectMember,
                 onDeleteMember = onDeleteMember
             )
@@ -775,21 +814,23 @@ private fun MembersScreen(
             when (val step = navStep) {
                 is MembersNavStep.SelectBatch -> {
                     Step1SelectBatchView(
-                        batchYears = defaultBatchYears,
+                        batchYears = batchYears,
                         members = members,
                         payments = payments,
                         onSelectBatch = { batch ->
                             navStep = MembersNavStep.SelectPeriod(batch)
                         },
-                        onAddCustomBatch = { showAddBatchDialog = true }
+                        onAddCustomBatch = { showAddBatchDialog = true },
+                        onDeleteBatch = { batchToDelete = it }
                     )
                 }
                 is MembersNavStep.SelectPeriod -> {
                     Step2SelectPeriodView(
                         batchYear = step.batchYear,
-                        members = members,
+                        members = members.filter { it.batchYear == step.batchYear.year },
                         payments = payments,
                         onBack = { navStep = MembersNavStep.SelectBatch },
+                        onDeleteBatch = { batchToDelete = step.batchYear },
                         onSelectPeriod = { period ->
                             navStep = MembersNavStep.PeriodDetails(step.batchYear, period)
                         }
@@ -799,7 +840,7 @@ private fun MembersScreen(
                     Step3PeriodDetailsView(
                         batchYear = step.batchYear,
                         period = step.period,
-                        members = members,
+                        members = members.filter { it.batchYear == step.batchYear.year },
                         payments = payments,
                         onBack = { navStep = MembersNavStep.SelectPeriod(step.batchYear) },
                         onSelectMember = onSelectMember,
@@ -816,10 +857,50 @@ private fun MembersScreen(
         AddBatchYearDialog(
             onDismiss = { showAddBatchDialog = false },
             onAdd = { newBatch ->
-                if (customBatchYears.none { it.year == newBatch.year }) {
-                    customBatchYears.add(newBatch)
+                if (batchYears.any { it.year == newBatch.year }) {
+                    Toast.makeText(context, "Batch ${newBatch.displayLabel} already exists", Toast.LENGTH_SHORT).show()
+                } else {
+                    onAddBatch(newBatch.year)
+                    showAddBatchDialog = false
                 }
-                showAddBatchDialog = false
+            }
+        )
+    }
+
+    batchToDelete?.let { batch ->
+        val batchMemberIds = members.filter { it.batchYear == batch.year }.map { it.id }.toSet()
+        val batchPaymentCount = payments.count { it.memberId in batchMemberIds }
+        AlertDialog(
+            onDismissRequest = { batchToDelete = null },
+            title = { Text("Delete batch ${batch.displayLabel}?") },
+            text = {
+                Text(
+                    "This permanently deletes batch ${batch.displayLabel} with its ${batchMemberIds.size} member(s) " +
+                        "and $batchPaymentCount payment record(s). Other batches are not affected. This cannot be undone."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val target = batch
+                        batchToDelete = null
+                        val open = when (val s = navStep) {
+                            is MembersNavStep.SelectBatch -> null
+                            is MembersNavStep.SelectPeriod -> s.batchYear
+                            is MembersNavStep.PeriodDetails -> s.batchYear
+                        }
+                        if (open?.year == target.year) navStep = MembersNavStep.SelectBatch
+                        onDeleteBatch(target.year)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete batch")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { batchToDelete = null }) {
+                    Text(stringResource(R.string.btn_cancel))
+                }
             }
         )
     }
@@ -831,7 +912,8 @@ private fun Step1SelectBatchView(
     members: List<MemberEntity>,
     payments: List<PaymentEntity>,
     onSelectBatch: (BatchYear) -> Unit,
-    onAddCustomBatch: () -> Unit
+    onAddCustomBatch: () -> Unit,
+    onDeleteBatch: (BatchYear) -> Unit
 ) {
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -854,11 +936,12 @@ private fun Step1SelectBatchView(
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(batchYears, key = { it.displayLabel }) { batch ->
+                val batchMemberIds = members.filter { it.batchYear == batch.year }.map { it.id }.toSet()
                 val batchPayments = payments.filter {
-                    it.syncStatus != "reversed" && it.periodYear == batch.year
+                    it.syncStatus != "reversed" && it.periodYear == batch.year && it.memberId in batchMemberIds
                 }
                 val totalCollected = batchPayments.sumOf { it.amountTzs }
-                val batchActiveMembersCount = members.count { it.status == "active" }
+                val batchActiveMembersCount = members.count { it.batchYear == batch.year && it.status == "active" }
 
                 Card(
                     modifier = Modifier
@@ -901,6 +984,13 @@ private fun Step1SelectBatchView(
                                 color = MaterialTheme.colorScheme.primary
                             )
                         }
+                        IconButton(onClick = { onDeleteBatch(batch) }) {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = "Delete batch",
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
                         Icon(
                             Icons.Default.ChevronRight,
                             contentDescription = null,
@@ -930,6 +1020,7 @@ private fun Step2SelectPeriodView(
     members: List<MemberEntity>,
     payments: List<PaymentEntity>,
     onBack: () -> Unit,
+    onDeleteBatch: () -> Unit,
     onSelectPeriod: (ContributionPeriod) -> Unit
 ) {
     val activeMembers = remember(members) {
@@ -937,11 +1028,15 @@ private fun Step2SelectPeriodView(
     }
 
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = onBack) {
                 Icon(Icons.Default.ArrowBack, contentDescription = null)
                 Spacer(Modifier.width(4.dp))
                 Text(stringResource(R.string.back_to_batches))
+            }
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = onDeleteBatch) {
+                Icon(Icons.Default.Delete, contentDescription = "Delete batch", tint = MaterialTheme.colorScheme.error)
             }
         }
 
@@ -1283,15 +1378,18 @@ private fun Step3PeriodDetailsView(
 @Composable
 private fun AllMembersDirectoryView(
     members: List<MemberEntity>,
+    batchYears: List<BatchYear>,
     onSelectMember: (MemberEntity) -> Unit,
     onDeleteMember: (MemberEntity) -> Unit
 ) {
     var search by remember { mutableStateOf("") }
     var selectedStatusFilter by remember { mutableStateOf("all") }
+    var selectedBatchFilter by remember { mutableStateOf<Int?>(null) }
     var memberToDelete by remember { mutableStateOf<MemberEntity?>(null) }
 
-    val filtered = remember(members, search, selectedStatusFilter) {
+    val filtered = remember(members, search, selectedStatusFilter, selectedBatchFilter) {
         members.filter { m ->
+            (selectedBatchFilter == null || m.batchYear == selectedBatchFilter) &&
             (selectedStatusFilter == "all" || m.status.equals(selectedStatusFilter, true)) &&
             (m.fullName.contains(search, true) || m.memberNo.contains(search, true) || m.phone.contains(search, true))
         }
@@ -1314,6 +1412,21 @@ private fun AllMembersDirectoryView(
             }
         }
 
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FilterChip(
+                selected = selectedBatchFilter == null,
+                onClick = { selectedBatchFilter = null },
+                label = { Text("All batches") }
+            )
+            batchYears.forEach { b ->
+                FilterChip(
+                    selected = selectedBatchFilter == b.year,
+                    onClick = { selectedBatchFilter = b.year },
+                    label = { Text(b.displayLabel) }
+                )
+            }
+        }
+
         Spacer(Modifier.height(8.dp))
 
         if (filtered.isEmpty()) {
@@ -1332,7 +1445,7 @@ private fun AllMembersDirectoryView(
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(member.fullName, fontWeight = FontWeight.SemiBold)
-                                Text("${member.memberNo}${if (member.phone.isNotBlank()) " · ${member.phone}" else ""}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("Batch ${member.batchYear} · ${member.memberNo}${if (member.phone.isNotBlank()) " · ${member.phone}" else ""}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             Text(member.status.replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.labelSmall)
                             IconButton(onClick = { memberToDelete = member }) {
@@ -1489,22 +1602,12 @@ private fun PaymentsScreen(
 @Composable
 private fun ReportsScreen(
     modifier: Modifier,
-<<<<<<< HEAD
     members: List<MemberEntity>,
-=======
-    monthTotal: Long,
-    yearlyTotal: Long,
-    memberCount: Int,
-    activeCount: Int,
-    paymentCount: Int,
-    defaulters: List<MemberEntity>,
->>>>>>> fef975d8d515490084c5c154ca0583aa3ec0c026
     payments: List<PaymentEntity>,
     expenses: List<ExpenseEntity>,
     onExport: () -> Unit
 ) {
     val context = LocalContext.current
-<<<<<<< HEAD
     var selectedReportType by rememberSaveable { mutableIntStateOf(0) } // 0 = Monthly, 1 = Annual
 
     val currentCal = remember { Calendar.getInstance() }
@@ -1515,7 +1618,9 @@ private fun ReportsScreen(
         listOf("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
     }
 
-    val activeMembers = remember(members) { members.filter { it.status == "active" } }
+    // Each batch has its own members, so a report only covers the members of the selected year.
+    val yearMembers = remember(members, selectedYear) { members.filter { it.batchYear == selectedYear } }
+    val activeMembers = remember(yearMembers) { yearMembers.filter { it.status == "active" } }
     val activeCount = activeMembers.size
 
     val availableYears = remember(payments, expenses) {
@@ -1615,8 +1720,8 @@ private fun ReportsScreen(
         }
     }
 
-    val sortedMembers = remember(members) {
-        members.sortedBy { it.fullName.lowercase(Locale.ROOT) }
+    val sortedMembers = remember(yearMembers) {
+        yearMembers.sortedBy { it.fullName.lowercase(Locale.ROOT) }
     }
 
     val termMemberRows = remember(sortedMembers, termPayments, termMonthRange) {
@@ -1643,44 +1748,11 @@ private fun ReportsScreen(
 
     val grandTotalTerm = remember(termMemberRows) {
         termMemberRows.sumOf { it.totalAmount }
-=======
-    val monthStr = SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(Date())
-    val calendar = remember { Calendar.getInstance() }
-    val currentYear = calendar.get(Calendar.YEAR)
-    val currentMonth = calendar.get(Calendar.MONTH) + 1
-    var reportPeriod by rememberSaveable { mutableStateOf("monthly") }
-
-    val monthlyExpenses = remember(expenses, currentYear, currentMonth) {
-        expenses.filter { expense ->
-            val date = Calendar.getInstance().apply { timeInMillis = expense.expenseDate }
-            (expense.status == "paid" || expense.status == "approved") &&
-                date.get(Calendar.YEAR) == currentYear && date.get(Calendar.MONTH) + 1 == currentMonth
-        }.sumOf { it.amountTzs }
-    }
-    val annualExpenses = remember(expenses, currentYear) {
-        expenses.filter { expense ->
-            val date = Calendar.getInstance().apply { timeInMillis = expense.expenseDate }
-            (expense.status == "paid" || expense.status == "approved") && date.get(Calendar.YEAR) == currentYear
-        }.sumOf { it.amountTzs }
-    }
-    val selectedCollections = if (reportPeriod == "monthly") monthTotal else yearlyTotal
-    val selectedExpenses = if (reportPeriod == "monthly") monthlyExpenses else annualExpenses
-    val netMovement = selectedCollections - selectedExpenses
-    val expected = activeCount.toLong() * 10000L * if (reportPeriod == "monthly") 1L else 12L
-    val arrearsEstimate = (expected - selectedCollections).coerceAtLeast(0L)
-
-    val batchBreakdown = remember(payments, currentYear) {
-        payments.filter { it.syncStatus != "reversed" && it.periodYear == currentYear }
-            .groupBy { p -> if (p.periodMonth >= 7) "${p.periodYear}/${p.periodYear + 1}" else "${p.periodYear - 1}/${p.periodYear}" }
-            .mapValues { entry -> entry.value.sumOf { it.amountTzs } }
->>>>>>> fef975d8d515490084c5c154ca0583aa3ec0c026
     }
 
     Column(modifier = modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(stringResource(R.string.reports_title), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-        Text("Committee-ready financial and membership reports", color = MaterialTheme.colorScheme.onSurfaceVariant)
 
-<<<<<<< HEAD
         // View Selector Tabs (Monthly vs Annual vs Term)
         TabRow(selectedTabIndex = selectedReportType) {
             Tab(
@@ -1784,32 +1856,14 @@ private fun ReportsScreen(
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-=======
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            FilterChip(
-                selected = reportPeriod == "monthly",
-                onClick = { reportPeriod = "monthly" },
-                label = { Text("Monthly · $monthStr") },
-                modifier = Modifier.weight(1f)
-            )
-            FilterChip(
-                selected = reportPeriod == "annual",
-                onClick = { reportPeriod = "annual" },
-                label = { Text("Annual · $currentYear") },
-                modifier = Modifier.weight(1f)
-            )
-        }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
->>>>>>> fef975d8d515490084c5c154ca0583aa3ec0c026
             OutlinedButton(onClick = onExport, modifier = Modifier.weight(1f)) {
                 Icon(Icons.Default.FileDownload, contentDescription = null)
                 Spacer(Modifier.width(4.dp))
                 Text(stringResource(R.string.export_csv), style = MaterialTheme.typography.labelSmall)
             }
+
             Button(
                 onClick = {
-<<<<<<< HEAD
                     val file = if (selectedReportType == 2) {
                         PdfGenerator.generateTermReportPdf(
                             context = context,
@@ -1831,7 +1885,7 @@ private fun ReportsScreen(
                             netMovement = monthlyNetMovement,
                             expectedContributions = expectedMonthly,
                             estimatedArrears = estimatedMonthlyArrears,
-                            memberCount = members.size,
+                            memberCount = yearMembers.size,
                             activeCount = activeCount,
                             breakdownMap = monthlyBatchBreakdown,
                             breakdownTitle = "Batch Collection Breakdown",
@@ -1848,48 +1902,27 @@ private fun ReportsScreen(
                             netMovement = annualNetMovement,
                             expectedContributions = expectedAnnual,
                             estimatedArrears = estimatedAnnualShortfall,
-                            memberCount = members.size,
+                            memberCount = yearMembers.size,
                             activeCount = activeCount,
                             breakdownMap = annualMonthlyBreakdown,
                             breakdownTitle = "Monthly Collection Breakdown",
                             arrearsMembers = annualArrearsMembers
                         )
                     }
-=======
-                    val title = if (reportPeriod == "monthly") "Monthly Financial Report" else "Annual Financial Report"
-                    val periodLabel = if (reportPeriod == "monthly") monthStr else currentYear.toString()
-                    val file = PdfGenerator.generateReportPdf(
-                        context = context,
-                        reportTitle = title,
-                        monthTotal = monthTotal,
-                        yearlyTotal = yearlyTotal,
-                        expensesTotal = selectedExpenses,
-                        memberCount = memberCount,
-                        defaulters = defaulters,
-                        batchBreakdown = batchBreakdown,
-                        periodLabel = periodLabel,
-                        periodCollectionsTzs = selectedCollections
-                    )
->>>>>>> fef975d8d515490084c5c154ca0583aa3ec0c026
                     PdfGenerator.viewPdf(context, file)
                 },
                 modifier = Modifier.weight(1f)
             ) {
                 Icon(Icons.Default.PictureAsPdf, contentDescription = null)
                 Spacer(Modifier.width(4.dp))
-<<<<<<< HEAD
                 Text(
                     if (selectedReportType == 2) stringResource(R.string.generate_landscape_pdf) else stringResource(R.string.generate_pdf_report),
                     style = MaterialTheme.typography.labelSmall
                 )
-=======
-                Text("Generate PDF", style = MaterialTheme.typography.labelSmall)
->>>>>>> fef975d8d515490084c5c154ca0583aa3ec0c026
             }
         }
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-<<<<<<< HEAD
             if (selectedReportType == 2) {
                 item {
                     MetricCard("Term Contributions Grand Total ($termTitle $selectedYear)", money(grandTotalTerm), Modifier.fillMaxWidth())
@@ -1977,25 +2010,6 @@ private fun ReportsScreen(
                                             }
                                         }
                                     }
-=======
-            item { MetricCard("Collections for selected period", money(selectedCollections), Modifier.fillMaxWidth()) }
-            item { MetricCard("Approved / paid expenses for period", money(selectedExpenses), Modifier.fillMaxWidth()) }
-            item { MetricCard("Net movement (opening balance excluded)", money(netMovement), Modifier.fillMaxWidth()) }
-            item { MetricCard(if (reportPeriod == "monthly") "Expected contributions this month" else "Expected contributions this year", money(expected), Modifier.fillMaxWidth()) }
-            item { MetricCard("Estimated outstanding contributions", money(arrearsEstimate), Modifier.fillMaxWidth()) }
-            item { MetricCard("Registered members", memberCount.toString(), Modifier.fillMaxWidth()) }
-            item { MetricCard("Payment records (all periods)", paymentCount.toString(), Modifier.fillMaxWidth()) }
-
-            if (batchBreakdown.isNotEmpty()) {
-                item {
-                    Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
-                        Column(Modifier.padding(14.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("Collections by batch (current year)", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                            batchBreakdown.toSortedMap().forEach { (batchLabel, collected) ->
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text("Batch $batchLabel", fontWeight = FontWeight.SemiBold)
-                                    Text(money(collected), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
->>>>>>> fef975d8d515490084c5c154ca0583aa3ec0c026
                                 }
                             }
                         }
@@ -2018,7 +2032,6 @@ private fun ReportsScreen(
                     MetricCard(stringResource(R.string.outstanding_estimate), money(estimatedMonthlyArrears), Modifier.fillMaxWidth())
                 }
 
-<<<<<<< HEAD
                 if (monthlyBatchBreakdown.isNotEmpty()) {
                     item {
                         Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
@@ -2052,24 +2065,6 @@ private fun ReportsScreen(
                                             }) {
                                                 Icon(Icons.Default.Sms, contentDescription = "SMS", tint = MaterialTheme.colorScheme.primary)
                                             }
-=======
-            item {
-                Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-                    Column(Modifier.padding(14.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("Current-month arrears", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                        if (defaulters.isEmpty()) Text(stringResource(R.string.no_defaulters), color = MaterialTheme.colorScheme.primary)
-                        else {
-                            Text("${defaulters.size} active member(s) have no payment recorded for $monthStr.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                            defaulters.forEach { member ->
-                                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text(member.fullName, fontWeight = FontWeight.SemiBold)
-                                        Text("${member.memberNo} · ${member.phone.ifBlank { "No phone recorded" }}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                    if (member.phone.isNotBlank()) {
-                                        IconButton(onClick = { ReminderManager.sendSmsReminder(context, member.phone, member.fullName, monthStr) }) {
-                                            Icon(Icons.Default.Sms, contentDescription = "SMS reminder", tint = MaterialTheme.colorScheme.primary)
->>>>>>> fef975d8d515490084c5c154ca0583aa3ec0c026
                                         }
                                     }
                                 }
@@ -2232,9 +2227,10 @@ private fun ReversePaymentDialog(payment: PaymentEntity, onDismiss: () -> Unit, 
 
 @Composable
 private fun AddMemberDialog(
+    batchYears: List<BatchYear>,
     initialBatchYear: BatchYear? = null,
     onDismiss: () -> Unit,
-    onSave: (String, String, String, Long) -> Unit
+    onSave: (String, String, String, BatchYear) -> Unit
 ) {
     var number by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("") }
@@ -2242,8 +2238,10 @@ private fun AddMemberDialog(
     var error by remember { mutableStateOf("") }
     val requiredMsg = stringResource(R.string.error_member_fields_required)
 
-    val joinTimestamp = remember(initialBatchYear) {
-        if (initialBatchYear != null) getBatchStartTimestamp(initialBatchYear) else System.currentTimeMillis()
+    // A member always belongs to exactly one batch: the open one, or the one picked below.
+    val sortedBatches = remember(batchYears) { batchYears.sortedByDescending { it.year } }
+    var selectedBatch by remember(initialBatchYear, sortedBatches) {
+        mutableStateOf(initialBatchYear ?: sortedBatches.firstOrNull { it.year == Calendar.getInstance().get(Calendar.YEAR) } ?: sortedBatches.firstOrNull())
     }
 
     AlertDialog(
@@ -2264,6 +2262,19 @@ private fun AddMemberDialog(
                             color = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                     }
+                } else if (sortedBatches.isEmpty()) {
+                    Text("Create a batch first (Members tab → +).", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                } else {
+                    Text("Batch", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        sortedBatches.forEach { b ->
+                            FilterChip(
+                                selected = selectedBatch?.year == b.year,
+                                onClick = { selectedBatch = b },
+                                label = { Text(b.displayLabel) }
+                            )
+                        }
+                    }
                 }
                 OutlinedTextField(number, { number = it; error = "" }, label = { Text(stringResource(R.string.label_member_number)) }, singleLine = true)
                 OutlinedTextField(name, { name = it; error = "" }, label = { Text(stringResource(R.string.label_full_name)) }, singleLine = true)
@@ -2271,7 +2282,12 @@ private fun AddMemberDialog(
                 if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             }
         },
-        confirmButton = { Button(onClick = { if (number.isBlank() || name.isBlank()) error = requiredMsg else onSave(number, name, phone, joinTimestamp) }) { Text(stringResource(R.string.btn_save_member)) } },
+        confirmButton = {
+            Button(onClick = {
+                val batch = selectedBatch
+                if (number.isBlank() || name.isBlank() || batch == null) error = requiredMsg else onSave(number, name, phone, batch)
+            }) { Text(stringResource(R.string.btn_save_member)) }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.btn_cancel)) } }
     )
 }
@@ -2286,14 +2302,18 @@ private fun RecordPaymentDialog(
     onDismiss: () -> Unit,
     onSave: (MemberEntity, Long, Int, Int, String) -> Unit
 ) {
-    var selectedMemberId by remember(initialMember) { mutableStateOf(initialMember?.id ?: members.firstOrNull()?.id.orEmpty()) }
+    // Members are per batch, so when a member is given only that batch is offered.
+    val candidates = remember(members, initialMember) {
+        if (initialMember != null) members.filter { it.batchYear == initialMember.batchYear } else members
+    }
+    var selectedMemberId by remember(initialMember) { mutableStateOf(initialMember?.id ?: candidates.firstOrNull()?.id.orEmpty()) }
     var amount by remember { mutableStateOf("10000") }
     var year by remember(initialYear) { mutableStateOf((initialYear ?: Calendar.getInstance().get(Calendar.YEAR)).toString()) }
     var month by remember(initialMonth) { mutableStateOf((initialMonth ?: (Calendar.getInstance().get(Calendar.MONTH) + 1)).toString()) }
     var method by remember { mutableStateOf("cash") }
     var error by remember { mutableStateOf("") }
     var expanded by remember { mutableStateOf(false) }
-    val selected = members.firstOrNull { it.id == selectedMemberId }
+    val selected = candidates.firstOrNull { it.id == selectedMemberId }
 
     val errSelectMember = stringResource(R.string.error_select_member)
     val errPositiveAmount = stringResource(R.string.error_valid_positive_amount)
@@ -2305,18 +2325,21 @@ private fun RecordPaymentDialog(
         title = { Text(stringResource(R.string.dialog_record_contribution)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (members.isEmpty()) Text(stringResource(R.string.msg_register_member_first))
+                if (candidates.isEmpty()) Text(stringResource(R.string.msg_register_member_first))
                 else {
                     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
                         OutlinedTextField(
-                            value = selected?.let { "${it.memberNo} · ${it.fullName}" } ?: stringResource(R.string.select_member),
+                            value = selected?.let { "${it.memberNo} · ${it.fullName} (${it.batchYear})" } ?: stringResource(R.string.select_member),
                             onValueChange = {}, readOnly = true, label = { Text(stringResource(R.string.label_member)) },
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
                             modifier = Modifier.menuAnchor().fillMaxWidth()
                         )
                         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                            members.forEach { member ->
-                                DropdownMenuItem(text = { Text("${member.memberNo} · ${member.fullName}") }, onClick = { selectedMemberId = member.id; expanded = false })
+                            candidates.forEach { member ->
+                                DropdownMenuItem(
+                                    text = { Text("${member.memberNo} · ${member.fullName} (${member.batchYear})") },
+                                    onClick = { selectedMemberId = member.id; year = member.batchYear.toString(); expanded = false }
+                                )
                             }
                         }
                     }
@@ -2346,6 +2369,7 @@ private fun RecordPaymentDialog(
                     amt == null || amt <= 0 -> error = errPositiveAmount
                     m == null || m !in 1..12 -> error = errValidMonth
                     y == null || y !in 2000..2100 -> error = errValidYear
+                    y != selected.batchYear -> error = "This member belongs to batch ${selected.batchYear}. Payments must be in ${selected.batchYear}."
                     else -> onSave(selected, amt, y, m, method)
                 }
             }) { Text(stringResource(R.string.btn_save_payment)) }

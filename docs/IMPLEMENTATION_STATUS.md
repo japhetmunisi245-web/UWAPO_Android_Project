@@ -7,13 +7,10 @@
 - Record-payment dialog with member, amount, month, year, and payment method.
 - Payment history screen and receipt reference generation for local demo records.
 - Local reports screen.
-- Initial Supabase SQL migration and import CSV template.
+- Import CSV template.
 
 ## Not implemented / not verified
-- Cloud authentication and Supabase client connection.
 - Backend user provisioning and production-ready committee workflows.
-- Cloud synchronization, WorkManager queue, and conflict resolution.
-- Cloud-issued receipts and server idempotency wired into the app.
 - Expense approval/posting UI and server-side posting RPC.
 - PDF/CSV report export.
 - Historical register transcription and reconciliation.

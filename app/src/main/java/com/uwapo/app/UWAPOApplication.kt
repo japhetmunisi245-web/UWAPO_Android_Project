@@ -48,8 +48,10 @@ class UWAPOApplication : Application() {
             .addMigrations(
                 UWAPODatabase.MIGRATION_1_2,
                 UWAPODatabase.MIGRATION_2_3,
-                UWAPODatabase.MIGRATION_3_4
+                UWAPODatabase.MIGRATION_3_4,
+                UWAPODatabase.MIGRATION_4_5
             )
+            .addCallback(UWAPODatabase.SEED_CALLBACK)
 
         val dbPassphrase = securityManager.getDatabasePassphrase()
         if (!dbPassphrase.isNullOrBlank()) {

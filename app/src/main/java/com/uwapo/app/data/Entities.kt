@@ -5,7 +5,24 @@ import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "members", indices = [Index(value = ["memberNo"], unique = true), Index("status")])
+/**
+ * A batch is one contribution year (e.g. 2026). Every batch owns its own members:
+ * a member row belongs to exactly one batch and is never shared with another one.
+ */
+@Entity(tableName = "batches")
+data class BatchEntity(
+    @PrimaryKey val year: Int,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+@Entity(
+    tableName = "members",
+    indices = [
+        Index(value = ["batchYear", "memberNo"], unique = true),
+        Index("batchYear"),
+        Index("status")
+    ]
+)
 data class MemberEntity(
     @PrimaryKey val id: String,
     val memberNo: String,
@@ -14,7 +31,8 @@ data class MemberEntity(
     val joinedAt: Long = System.currentTimeMillis(),
     val status: String = "active",
     val syncStatus: String = "local",
-    val notes: String = ""
+    val notes: String = "",
+    val batchYear: Int = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
 )
 
 @Entity(

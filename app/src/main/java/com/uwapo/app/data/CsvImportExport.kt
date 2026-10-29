@@ -30,7 +30,7 @@ object CsvImportExport {
     )
 
     fun export(members: List<MemberEntity>, payments: List<PaymentEntity>): String {
-        val header = listOf("member_no", "full_name", "phone", "join_date", "status", "period_year", "period_month", "amount_paid_tzs", "paid_at", "payment_method", "receipt_reference", "source_note")
+        val header = listOf("member_no", "full_name", "phone", "join_date", "status", "batch_year", "period_year", "period_month", "amount_paid_tzs", "paid_at", "payment_method", "receipt_reference", "source_note")
         val memberMap = members.associateBy { it.id }
         val lines = mutableListOf(header.joinToString(",") { csv(it) })
         payments.forEach { payment ->
@@ -38,13 +38,13 @@ object CsvImportExport {
             val paidDate = java.time.Instant.ofEpochMilli(payment.paidAt).atZone(ZoneId.of("Africa/Dar_es_Salaam")).toLocalDate().toString()
             val joinedDate = java.time.Instant.ofEpochMilli(member.joinedAt).atZone(ZoneId.of("Africa/Dar_es_Salaam")).toLocalDate().toString()
             lines += listOf(member.memberNo, member.fullName, member.phone, joinedDate, member.status,
-                payment.periodYear.toString(), payment.periodMonth.toString(), payment.amountTzs.toString(), paidDate,
+                member.batchYear.toString(), payment.periodYear.toString(), payment.periodMonth.toString(), payment.amountTzs.toString(), paidDate,
                 payment.method, payment.receiptNo, "Exported from UWAPO app (${payment.syncStatus})").joinToString(",") { csv(it) }
         }
         val paidMemberIds = payments.map { it.memberId }.toSet()
         members.filter { it.id !in paidMemberIds }.forEach { member ->
             val joinedDate = java.time.Instant.ofEpochMilli(member.joinedAt).atZone(ZoneId.of("Africa/Dar_es_Salaam")).toLocalDate().toString()
-            lines += listOf(member.memberNo, member.fullName, member.phone, joinedDate, member.status, "", "", "", "", "", "", "No payment row").joinToString(",") { csv(it) }
+            lines += listOf(member.memberNo, member.fullName, member.phone, joinedDate, member.status, member.batchYear.toString(), "", "", "", "", "", "", "No payment row").joinToString(",") { csv(it) }
         }
         return lines.joinToString("\r\n") + "\r\n"
     }
@@ -92,6 +92,8 @@ object CsvImportExport {
         status: String = "active",
         dao: UWAPODao
     ): Pair<MemberEntity, Boolean> {
+        // Batches are independent: only members of THIS batch (year) are ever matched or created.
+        dao.insertBatchIgnore(BatchEntity(year))
         val normName = normalizeMemberName(fullName)
         val matchedByName = if (normName.isNotBlank()) {
             existingMembers.find { normalizeMemberName(it.fullName) == normName }
@@ -107,7 +109,7 @@ object CsvImportExport {
         }
 
         val memberNo = num.ifBlank { fullName.replace(" ", "_").take(15) }
-        val memberId = UUID.nameUUIDFromBytes("UWAPO-MEMBER:$memberNo".toByteArray(Charsets.UTF_8)).toString()
+        val memberId = UUID.nameUUIDFromBytes("UWAPO-MEMBER:$year:$memberNo".toByteArray(Charsets.UTF_8)).toString()
         val joinDate = LocalDate.of(year, 7, 1)
         val newMember = MemberEntity(
             id = memberId,
@@ -116,19 +118,20 @@ object CsvImportExport {
             phone = phone,
             joinedAt = joinDate.atStartOfDay(ZoneId.of("Africa/Dar_es_Salaam")).toInstant().toEpochMilli(),
             status = status,
-            syncStatus = "pending"
+            syncStatus = "pending",
+            batchYear = year
         )
 
         val inserted = dao.insertMemberIgnore(newMember)
         val isAdded = inserted != -1L
-        val created = dao.getMemberByNumber(memberNo) ?: dao.getMember(memberId) ?: newMember
+        val created = dao.getMemberByNumber(year, memberNo) ?: dao.getMember(memberId) ?: newMember
         existingMembers.add(created)
         return Pair(created, isAdded)
     }
 
     private suspend fun importMatrixLedger(sheets: List<List<List<String>>>, dao: UWAPODao, targetStartYear: Int? = null): ImportResult {
         val year = targetStartYear ?: detectYear(sheets)
-        val existingMembers = dao.getAllMembersSync().toMutableList()
+        val existingMembers = dao.getMembersForBatchSync(year).toMutableList()
         var membersAdded = 0
         var paymentsAdded = 0
         val skipped = 0
@@ -241,6 +244,7 @@ object CsvImportExport {
         val iPhone = index("phone", "phone_number", "phone number", "mobile")
         val iJoin = index("join_date", "joined_at", "join date", "date joined")
         val iStatus = index("status")
+        val iBatch = index("batch_year", "batch")
         val iYear = index("period_year", "year")
         val iMonth = index("period_month", "month")
         val iAmount = index("amount_paid_tzs", "amount", "paid", "amount paid", "amount_paid")
@@ -252,7 +256,8 @@ object CsvImportExport {
         var paymentsAdded = 0
         var skipped = 0
 
-        val existingMembers = dao.getAllMembersSync().toMutableList()
+        // One member list per batch year, so the same person in two batches stays two separate members.
+        val membersByBatch = mutableMapOf<Int, MutableList<MemberEntity>>()
         rows.drop(1).forEach { row ->
             fun value(i: Int) = if (i >= 0 && i < row.size) row[i].trim() else ""
             val rawName = value(iName)
@@ -262,7 +267,13 @@ object CsvImportExport {
             val fullName = if (rawName.isNotBlank() && iName != iNo) rawName else nameFromCell
 
             if (memberNo.isBlank() && fullName.isBlank()) { skipped++; return@forEach }
-            val defaultJoinYear = targetStartYear ?: LocalDate.now().year
+            val rowPaymentYear = cleanStr(value(iYear)).toIntOrNull()
+            val batchYear = targetStartYear
+                ?: cleanStr(value(iBatch)).toIntOrNull()?.takeIf { it in 2000..2100 }
+                ?: rowPaymentYear?.takeIf { it in 2000..2100 }
+                ?: LocalDate.now().year
+            val defaultJoinYear = batchYear
+            val existingMembers = membersByBatch.getOrPut(batchYear) { dao.getMembersForBatchSync(batchYear).toMutableList() }
             val (actualMember, isNew) = findOrRegisterMember(
                 existingMembers = existingMembers,
                 num = memberNo,
@@ -276,9 +287,10 @@ object CsvImportExport {
 
             val actualNo = actualMember.memberNo
             val amount = value(iAmount).replace(",", "").replace("TZS", "", ignoreCase = true).trim().let { it.toDoubleOrNull()?.toLong() ?: it.toLongOrNull() } ?: 0L
-            val year = cleanStr(value(iYear)).toIntOrNull() ?: targetStartYear
+            val year = rowPaymentYear ?: targetStartYear
             val month = cleanStr(value(iMonth)).toIntOrNull()
-            if (amount > 0 && year != null && year in 2000..2100 && month != null && month in 1..12) {
+            // A payment always belongs to the batch of its member; rows for another year are not mixed in.
+            if (amount > 0 && year != null && year == batchYear && year in 2000..2100 && month != null && month in 1..12) {
                 val paidDate = parseDate(value(iPaidAt)) ?: LocalDate.of(year, month, 1)
                 val method = value(iMethod).ifBlank { "cash" }.lowercase().replace(' ', '_')
                 val receipt = value(iReceipt).ifBlank { "IMPORT-$actualNo-$year-${month.toString().padStart(2,'0')}" }

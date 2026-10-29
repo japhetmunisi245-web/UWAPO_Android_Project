@@ -1,6 +1,6 @@
 # UWAPO security and acceptance test matrix
 
-Run these tests against a dedicated staging Supabase project before production.
+Run these tests on a test device with a copy of the local database before production.
 
 | Test | Expected result |
 |---|---|

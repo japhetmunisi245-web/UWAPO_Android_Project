@@ -34,11 +34,13 @@ fun MemberProfileDialog(
     member: MemberEntity,
     payments: List<PaymentEntity>,
     onDismiss: () -> Unit,
-    onUpdateProfile: (String, String, String) -> Unit,
+    onUpdateProfile: (memberNo: String, fullName: String, phone: String, status: String, notes: String) -> Unit,
     onDeleteMember: (MemberEntity) -> Unit = {},
     onDeletePayment: (PaymentEntity) -> Unit = {}
 ) {
     var isEditing by remember { mutableStateOf(false) }
+    var memberNo by remember(member.id) { mutableStateOf(member.memberNo) }
+    var fullName by remember(member.id) { mutableStateOf(member.fullName) }
     var phone by remember { mutableStateOf(member.phone) }
     var status by remember { mutableStateOf(member.status) }
     var notes by remember { mutableStateOf(member.notes) }
@@ -60,7 +62,7 @@ fun MemberProfileDialog(
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(member.fullName, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
-                    Text("${member.memberNo} · ${stringResource(R.string.joined_date, joinDateStr)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Batch ${member.batchYear} · ${member.memberNo} · ${stringResource(R.string.joined_date, joinDateStr)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 IconButton(onClick = { showDeleteConfirmation = true }) {
                     Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.btn_delete_member), tint = MaterialTheme.colorScheme.error)
@@ -73,6 +75,20 @@ fun MemberProfileDialog(
         text = {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (isEditing) {
+                    OutlinedTextField(
+                        value = memberNo,
+                        onValueChange = { memberNo = it },
+                        label = { Text(stringResource(R.string.label_member_number)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = fullName,
+                        onValueChange = { fullName = it },
+                        label = { Text(stringResource(R.string.label_full_name)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                     OutlinedTextField(
                         value = phone,
                         onValueChange = { phone = it },
@@ -117,7 +133,7 @@ fun MemberProfileDialog(
 
                     Button(
                         onClick = {
-                            onUpdateProfile(phone.trim(), status, notes.trim())
+                            onUpdateProfile(memberNo.trim(), fullName.trim(), phone.trim(), status, notes.trim())
                             isEditing = false
                         },
                         modifier = Modifier.fillMaxWidth()
