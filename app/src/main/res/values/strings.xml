@@ -249,4 +249,14 @@
     <string name="total_expenses">Total Expenses</string>
     <string name="batch_collections_summary">Batch Collection Breakdown</string>
     <string name="active_members_count">Active Members: %1$d</string>
+
+    <!-- Term Report Strings -->
+    <string name="term_report_tab">Term Report</string>
+    <string name="select_term">Select Term</string>
+    <string name="term_1_opt">Term 1 (Jan - Jun)</string>
+    <string name="term_2_opt">Term 2 (Jul - Dec)</string>
+    <string name="grand_total">Grand Total</string>
+    <string name="member_name_col">Full Name &amp; Member No</string>
+    <string name="total_tzs">Total (TZS)</string>
+    <string name="generate_landscape_pdf">Generate A4 Landscape PDF</string>
 </resources>

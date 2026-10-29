@@ -67,7 +67,6 @@ import java.util.UUID
 private enum class Tab(val labelRes: Int) {
     HOME(R.string.tab_home),
     MEMBERS(R.string.tab_members),
-    PAYMENTS(R.string.tab_payments),
     FINANCE(R.string.tab_finance),
     REPORTS(R.string.tab_reports)
 }
@@ -242,7 +241,6 @@ fun UWAPORoot(dao: UWAPODao) {
                     val icon = when (tab) {
                         Tab.HOME -> Icons.Default.Home
                         Tab.MEMBERS -> Icons.Default.People
-                        Tab.PAYMENTS -> Icons.Default.Payments
                         Tab.FINANCE -> Icons.Default.ReceiptLong
                         Tab.REPORTS -> Icons.Default.Assessment
                     }
@@ -259,7 +257,6 @@ fun UWAPORoot(dao: UWAPODao) {
         floatingActionButton = {
             when (selectedTab) {
                 Tab.MEMBERS -> FloatingActionButton(onClick = { showAddMember = true }) { Icon(Icons.Default.Add, contentDescription = stringResource(R.string.add_member)) }
-                Tab.PAYMENTS -> FloatingActionButton(onClick = { showPayment = true }) { Icon(Icons.Default.Add, contentDescription = stringResource(R.string.record_payment)) }
                 Tab.FINANCE -> FloatingActionButton(onClick = { showExpense = true }) { Icon(Icons.Default.Add, contentDescription = stringResource(R.string.record_expense)) }
                 else -> Unit
             }
@@ -271,20 +268,6 @@ fun UWAPORoot(dao: UWAPODao) {
                 modifier = Modifier.padding(padding),
                 members = members,
                 payments = payments,
-                onImport = {
-                    importLauncher.launch(
-                        arrayOf(
-                            "text/*",
-                            "text/csv",
-                            "application/vnd.ms-excel",
-                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            "application/xls",
-                            "application/xlsx",
-                            "application/octet-stream",
-                            "*/*"
-                        )
-                    )
-                },
                 onImportBatchForYear = { batch ->
                     batchToImport = batch
                     batchImportLauncher.launch(
@@ -320,12 +303,6 @@ fun UWAPORoot(dao: UWAPODao) {
                     initialMonthForPayment = month
                     showPayment = true
                 }
-            )
-            Tab.PAYMENTS -> PaymentsScreen(
-                Modifier.padding(padding), payments, members,
-                onReverse = { paymentToReverse = it },
-                onDeletePayment = { paymentToDelete = it },
-                onSelectPayment = { selectedPaymentForReceipt = it }
             )
             Tab.FINANCE -> FinanceScreen(
                 Modifier.padding(padding), expenses,
@@ -735,7 +712,6 @@ private fun MembersScreen(
     modifier: Modifier,
     members: List<MemberEntity>,
     payments: List<PaymentEntity>,
-    onImport: () -> Unit,
     onImportBatchForYear: (BatchYear) -> Unit,
     onAddMemberForBatch: (BatchYear) -> Unit,
     onSelectMember: (MemberEntity) -> Unit,
@@ -787,7 +763,6 @@ private fun MembersScreen(
         if (selectedMainTab == 1) {
             AllMembersDirectoryView(
                 members = members,
-                onImport = onImport,
                 onSelectMember = onSelectMember,
                 onDeleteMember = onDeleteMember
             )
@@ -1303,7 +1278,6 @@ private fun Step3PeriodDetailsView(
 @Composable
 private fun AllMembersDirectoryView(
     members: List<MemberEntity>,
-    onImport: () -> Unit,
     onSelectMember: (MemberEntity) -> Unit,
     onDeleteMember: (MemberEntity) -> Unit
 ) {
@@ -1335,12 +1309,6 @@ private fun AllMembersDirectoryView(
             }
         }
 
-        Spacer(Modifier.height(8.dp))
-        OutlinedButton(onClick = onImport, modifier = Modifier.fillMaxWidth()) {
-            Icon(Icons.Default.FileDownload, contentDescription = null)
-            Spacer(Modifier.width(8.dp))
-            Text(stringResource(R.string.import_csv))
-        }
         Spacer(Modifier.height(8.dp))
 
         if (filtered.isEmpty()) {
@@ -1614,10 +1582,58 @@ private fun ReportsScreen(
         }
     }
 
+    // --- TERM DATA ---
+    var selectedTerm by rememberSaveable { mutableIntStateOf(0) } // 0 = Term 1 (Jan - Jun), 1 = Term 2 (Jul - Dec)
+
+    val termTitle = if (selectedTerm == 0) "Term 1 (Jan - Jun)" else "Term 2 (Jul - Dec)"
+    val termMonthRange = if (selectedTerm == 0) 1..6 else 7..12
+    val termMonthLabels = if (selectedTerm == 0)
+        listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun")
+    else
+        listOf("Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+    val termPayments = remember(payments, selectedYear, selectedTerm) {
+        payments.filter {
+            it.syncStatus != "reversed" &&
+            it.periodYear == selectedYear &&
+            it.periodMonth in termMonthRange
+        }
+    }
+
+    val sortedMembers = remember(members) {
+        members.sortedBy { it.fullName.lowercase(Locale.ROOT) }
+    }
+
+    val termMemberRows = remember(sortedMembers, termPayments, termMonthRange) {
+        sortedMembers.map { m ->
+            val mPayments = termPayments.filter { it.memberId == m.id }
+            val monthlyAmounts = termMonthRange.map { monthNum ->
+                mPayments.filter { it.periodMonth == monthNum }.sumOf { it.amountTzs }
+            }
+            val totalAmount = monthlyAmounts.sum()
+            PdfGenerator.TermMemberContributionRow(
+                memberNo = m.memberNo,
+                fullName = m.fullName,
+                monthlyAmounts = monthlyAmounts,
+                totalAmount = totalAmount
+            )
+        }
+    }
+
+    val grandTotalMonthly = remember(termMemberRows) {
+        (0..5).map { mIdx ->
+            termMemberRows.sumOf { it.monthlyAmounts.getOrElse(mIdx) { 0L } }
+        }
+    }
+
+    val grandTotalTerm = remember(termMemberRows) {
+        termMemberRows.sumOf { it.totalAmount }
+    }
+
     Column(modifier = modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(stringResource(R.string.reports_title), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
 
-        // View Selector Tabs (Monthly vs Annual)
+        // View Selector Tabs (Monthly vs Annual vs Term)
         TabRow(selectedTabIndex = selectedReportType) {
             Tab(
                 selected = selectedReportType == 0,
@@ -1629,9 +1645,14 @@ private fun ReportsScreen(
                 onClick = { selectedReportType = 1 },
                 text = { Text(stringResource(R.string.annual_report_tab), fontWeight = FontWeight.Bold) }
             )
+            Tab(
+                selected = selectedReportType == 2,
+                onClick = { selectedReportType = 2 },
+                text = { Text(stringResource(R.string.term_report_tab), fontWeight = FontWeight.Bold) }
+            )
         }
 
-        // Controls row (Year & Month Selector)
+        // Controls row (Year, Month, or Term Selector)
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1685,6 +1706,32 @@ private fun ReportsScreen(
                         }
                     }
                 }
+            } else if (selectedReportType == 2) {
+                var termExpanded by remember { mutableStateOf(false) }
+                ExposedDropdownMenuBox(
+                    expanded = termExpanded,
+                    onExpandedChange = { termExpanded = !termExpanded },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    OutlinedTextField(
+                        value = if (selectedTerm == 0) stringResource(R.string.term_1_opt) else stringResource(R.string.term_2_opt),
+                        onValueChange = {},
+                        readOnly = true,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = termExpanded) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth(),
+                        textStyle = MaterialTheme.typography.bodyMedium
+                    )
+                    ExposedDropdownMenu(expanded = termExpanded, onDismissRequest = { termExpanded = false }) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.term_1_opt)) },
+                            onClick = { selectedTerm = 0; termExpanded = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.term_2_opt)) },
+                            onClick = { selectedTerm = 1; termExpanded = false }
+                        )
+                    }
+                }
             }
         }
 
@@ -1697,8 +1744,18 @@ private fun ReportsScreen(
 
             Button(
                 onClick = {
-                    val periodTitle = if (selectedReportType == 0) "${monthNames[selectedMonth - 1]} $selectedYear" else "Year $selectedYear"
-                    val file = if (selectedReportType == 0) {
+                    val file = if (selectedReportType == 2) {
+                        PdfGenerator.generateTermReportPdf(
+                            context = context,
+                            termTitle = termTitle,
+                            year = selectedYear,
+                            monthLabels = termMonthLabels,
+                            memberRows = termMemberRows,
+                            grandTotalMonthly = grandTotalMonthly,
+                            grandTotalTerm = grandTotalTerm
+                        )
+                    } else if (selectedReportType == 0) {
+                        val periodTitle = "${monthNames[selectedMonth - 1]} $selectedYear"
                         PdfGenerator.generateReportPdf(
                             context = context,
                             reportType = "Monthly",
@@ -1715,6 +1772,7 @@ private fun ReportsScreen(
                             arrearsMembers = monthlyArrearsMembers
                         )
                     } else {
+                        val periodTitle = "Year $selectedYear"
                         PdfGenerator.generateReportPdf(
                             context = context,
                             reportType = "Annual",
@@ -1737,12 +1795,107 @@ private fun ReportsScreen(
             ) {
                 Icon(Icons.Default.PictureAsPdf, contentDescription = null)
                 Spacer(Modifier.width(4.dp))
-                Text(stringResource(R.string.generate_pdf_report), style = MaterialTheme.typography.labelSmall)
+                Text(
+                    if (selectedReportType == 2) stringResource(R.string.generate_landscape_pdf) else stringResource(R.string.generate_pdf_report),
+                    style = MaterialTheme.typography.labelSmall
+                )
             }
         }
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (selectedReportType == 0) {
+            if (selectedReportType == 2) {
+                item {
+                    MetricCard("Term Contributions Grand Total ($termTitle $selectedYear)", money(grandTotalTerm), Modifier.fillMaxWidth())
+                }
+
+                item {
+                    Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                        Column(Modifier.padding(14.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Member Contributions ($termTitle)", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                Text("${sortedMembers.size} Members", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                            }
+
+                            HorizontalDivider()
+
+                            if (termMemberRows.isEmpty()) {
+                                Text("No members found.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            } else {
+                                termMemberRows.forEach { row ->
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = MaterialTheme.colorScheme.surface,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(Modifier.padding(10.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Row(
+                                                Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text("${row.fullName} (${row.memberNo})", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                                                Text(money(row.totalAmount), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                                            }
+
+                                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                termMonthLabels.forEachIndexed { mIdx, monthLabel ->
+                                                    val amt = row.monthlyAmounts.getOrElse(mIdx) { 0L }
+                                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                        Text(monthLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                        Text(
+                                                            if (amt > 0) money(amt).replace("TZS ", "") else "-",
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            fontWeight = if (amt > 0) FontWeight.SemiBold else FontWeight.Normal
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            HorizontalDivider(Modifier.padding(vertical = 4.dp))
+
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(Modifier.padding(12.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Row(
+                                        Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(stringResource(R.string.grand_total), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                        Text(money(grandTotalTerm), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+                                    }
+
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        termMonthLabels.forEachIndexed { mIdx, monthLabel ->
+                                            val monthlySum = grandTotalMonthly.getOrElse(mIdx) { 0L }
+                                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                Text(monthLabel, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                                Text(
+                                                    if (monthlySum > 0) money(monthlySum).replace("TZS ", "") else "0",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if (selectedReportType == 0) {
                 item {
                     MetricCard(stringResource(R.string.monthly_net_movement), money(monthlyNetMovement), Modifier.fillMaxWidth())
                 }

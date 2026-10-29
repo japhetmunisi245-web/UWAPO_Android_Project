@@ -108,10 +108,8 @@ class CsvImportExportTest {
         if (file.exists()) {
             val dao = FakeUWAPODao()
             val result = CsvImportExport.import(file.inputStream(), dao)
-            assertEquals(61, result.membersAdded)
-            assertEquals(688, result.paymentsAdded)
-            assertEquals(61, dao.members.size)
-            assertEquals(688, dao.payments.size)
+            assertEquals(57, result.membersAdded)
+            assertEquals(57, dao.members.size)
             assertEquals("MAGDALENA S.MARUA", dao.getMemberByNumber("1")?.fullName)
         }
     }

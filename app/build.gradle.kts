@@ -34,6 +34,15 @@ ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
 }
 
+configurations.all {
+    resolutionStrategy.force(
+        "org.jetbrains.kotlin:kotlin-stdlib:2.0.21",
+        "org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.0.21",
+        "org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.0.21",
+        "org.jetbrains.kotlin:kotlin-stdlib-common:2.0.21"
+    )
+}
+
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
     implementation(composeBom)
@@ -55,7 +64,7 @@ dependencies {
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("androidx.biometric:biometric:1.1.0")
     implementation("androidx.documentfile:documentfile:1.0.1")
-    implementation("net.zetetic:sqlcipher-android:4.20.0")
+    implementation("net.zetetic:android-database-sqlcipher:4.5.4")
     implementation("androidx.work:work-runtime-ktx:2.9.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     testImplementation("junit:junit:4.13.2")

@@ -249,4 +249,14 @@
     <string name="total_expenses">Jumla ya Matumizi</string>
     <string name="batch_collections_summary">Muhtasari wa Makusanyo kwa Batch</string>
     <string name="active_members_count">Wanachama Hai: %1$d</string>
+
+    <!-- Term Report Strings -->
+    <string name="term_report_tab">Ripoti ya Muhula</string>
+    <string name="select_term">Chagua Muhula</string>
+    <string name="term_1_opt">Term 1 (Jan - Jun)</string>
+    <string name="term_2_opt">Term 2 (Jul - Des)</string>
+    <string name="grand_total">Jumla Kuu</string>
+    <string name="member_name_col">Jina Bufuli na Namba</string>
+    <string name="total_tzs">Jumla (TZS)</string>
+    <string name="generate_landscape_pdf">Tengeneza PDF (A4 Landscape)</string>
 </resources>

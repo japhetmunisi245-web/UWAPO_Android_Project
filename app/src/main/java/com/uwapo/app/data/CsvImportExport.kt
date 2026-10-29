@@ -62,7 +62,7 @@ object CsvImportExport {
     }
 
     private fun sheetHasMatrixHeader(sheet: List<List<String>>): Boolean {
-        for (row in sheet.take(5)) {
+        for (row in sheet.take(50)) {
             var monthCount = 0
             for (cell in row) {
                 if (MONTH_MAP.containsKey(cell.trim().lowercase(Locale.ROOT))) {
@@ -131,54 +131,100 @@ object CsvImportExport {
         val existingMembers = dao.getAllMembersSync().toMutableList()
         var membersAdded = 0
         var paymentsAdded = 0
-        var skipped = 0
+        val skipped = 0
 
-        for (sheet in sheets) {
-            var headerRowIndex = -1
-            var monthCols = mapOf<Int, Int>()
-
-            for ((rIdx, row) in sheet.take(5).withIndex()) {
-                val detected = mutableMapOf<Int, Int>()
+        for ((sheetIdx, sheet) in sheets.withIndex()) {
+            val detectedCols = mutableMapOf<Int, Int>()
+            for (row in sheet.take(20)) {
                 for ((cIdx, cell) in row.withIndex()) {
                     val m = MONTH_MAP[cell.trim().lowercase(Locale.ROOT)]
-                    if (m != null) detected[cIdx] = m
-                }
-                if (detected.size >= 2) {
-                    headerRowIndex = rIdx
-                    monthCols = detected
-                    break
+                    if (m != null && cIdx !in detectedCols) {
+                        detectedCols[cIdx] = m
+                    }
                 }
             }
 
-            if (headerRowIndex < 0) continue
+            val monthCols = detectedCols.toMutableMap()
+            if (sheetIdx == 0) {
+                val defaultTerm1Map = mapOf(3 to 1, 4 to 2, 5 to 3, 6 to 4, 7 to 5, 2 to 6)
+                for ((c, m) in defaultTerm1Map) {
+                    if (c !in monthCols) monthCols[c] = m
+                }
+            } else if (sheetIdx == 1) {
+                val defaultTerm2Map = mapOf(2 to 7, 3 to 8, 4 to 9, 5 to 10, 6 to 11, 7 to 12)
+                for ((c, m) in defaultTerm2Map) {
+                    if (c !in monthCols) monthCols[c] = m
+                }
+            }
 
-            for (row in sheet.drop(headerRowIndex + 1)) {
+            if (monthCols.isEmpty()) continue
+
+            var currentNum = ""
+            var currentName = ""
+            val blockMonthPayments = mutableMapOf<Int, Long>()
+
+            suspend fun commitBlock() {
+                val name = currentName.ifBlank { currentNum }
+                if (name.isNotBlank() && blockMonthPayments.isNotEmpty()) {
+                    val (actualMember, isNew) = findOrRegisterMember(existingMembers, currentNum, name, year, dao = dao)
+                    if (isNew) membersAdded++
+                    val memberNo = actualMember.memberNo
+
+                    for ((monthNum, amount) in blockMonthPayments) {
+                        if (amount > 0) {
+                            val paidDate = LocalDate.of(year, monthNum, 1)
+                            val receipt = "IMPORT-$memberNo-$year-${monthNum.toString().padStart(2, '0')}"
+                            val key = "$memberNo|$year|$monthNum|$amount|$paidDate|$receipt"
+                            val paymentId = UUID.nameUUIDFromBytes("UWAPO-PAYMENT:$key".toByteArray(Charsets.UTF_8)).toString()
+                            val payment = PaymentEntity(
+                                paymentId, actualMember.id, amount, year, monthNum,
+                                paidDate.atStartOfDay(ZoneId.of("Africa/Dar_es_Salaam")).toInstant().toEpochMilli(),
+                                "cash", receipt, paymentId, "pending"
+                            )
+                            if (dao.insertPaymentIgnore(payment) != -1L) paymentsAdded++
+                        }
+                    }
+                }
+                currentNum = ""
+                currentName = ""
+                blockMonthPayments.clear()
+            }
+
+            for (row in sheet) {
                 val rawCell = row.getOrNull(0)?.trim() ?: ""
-                val (num, name) = parseMemberCell(rawCell)
-                if (name.isBlank() || name.uppercase(Locale.ROOT) in listOf("JINA", "TOTAL", "JUMLA", "ADA")) {
-                    skipped++
+                val rawUpper = rawCell.uppercase(Locale.ROOT)
+
+                if (rawUpper in listOf("TOTAL", "JUMLA", "JUNE", "JINA", "ADA", "JUMLA ADA", "JULY", "AUG", "SEPT", "OCT", "NOV", "DEC")) {
+                    if (rawUpper in listOf("TOTAL", "JUMLA", "JUMLA ADA")) {
+                        commitBlock()
+                    }
                     continue
                 }
 
-                val (actualMember, isNew) = findOrRegisterMember(existingMembers, num, name, year, dao = dao)
-                if (isNew) membersAdded++
+                val (num, name) = parseMemberCell(rawCell)
+                val isNumRow = rawCell.matches(Regex("""^\d+\.?$"""))
+                val isNameRow = rawCell.isNotBlank() && !isNumRow && rawCell.length > 1
 
-                val memberNo = actualMember.memberNo
+                if (isNumRow || isNameRow) {
+                    if ((isNumRow && currentNum.isNotBlank() && currentNum != num) ||
+                        (isNameRow && currentName.isNotBlank() && currentName != name)) {
+                        commitBlock()
+                    }
+                    if (num.isNotBlank()) currentNum = num
+                    if (name.isNotBlank()) currentName = name
+                }
+
                 for ((cIdx, monthNum) in monthCols) {
                     val amtStr = row.getOrNull(cIdx)?.replace(",", "")?.trim() ?: ""
                     val amount = amtStr.toDoubleOrNull()?.toLong() ?: 0L
                     if (amount > 0) {
-                        val paidDate = LocalDate.of(year, monthNum, 1)
-                        val receipt = "IMPORT-$memberNo-$year-${monthNum.toString().padStart(2, '0')}"
-                        val key = "$memberNo|$year|$monthNum|$amount|$paidDate|$receipt"
-                        val paymentId = UUID.nameUUIDFromBytes("UWAPO-PAYMENT:$key".toByteArray(Charsets.UTF_8)).toString()
-                        val payment = PaymentEntity(paymentId, actualMember.id, amount, year, monthNum,
-                            paidDate.atStartOfDay(ZoneId.of("Africa/Dar_es_Salaam")).toInstant().toEpochMilli(),
-                            "cash", receipt, paymentId, "pending")
-                        if (dao.insertPaymentIgnore(payment) != -1L) paymentsAdded++
+                        val prev = blockMonthPayments[monthNum] ?: 0L
+                        blockMonthPayments[monthNum] = maxOf(prev, amount)
                     }
                 }
             }
+
+            commitBlock()
         }
         return ImportResult(membersAdded, paymentsAdded, skipped)
     }

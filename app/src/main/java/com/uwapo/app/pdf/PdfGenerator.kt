@@ -514,6 +514,186 @@ object PdfGenerator {
         return file
     }
 
+    data class TermMemberContributionRow(
+        val memberNo: String,
+        val fullName: String,
+        val monthlyAmounts: List<Long>,
+        val totalAmount: Long
+    )
+
+    fun generateTermReportPdf(
+        context: Context,
+        termTitle: String,
+        year: Int,
+        monthLabels: List<String>,
+        memberRows: List<TermMemberContributionRow>,
+        grandTotalMonthly: List<Long>,
+        grandTotalTerm: Long
+    ): File {
+        val document = PdfDocument()
+        val paint = Paint().apply { isAntiAlias = true }
+
+        val pageWidth = 842
+        val pageHeight = 595
+        val marginLeft = 30f
+        val marginRight = 812f
+        val marginBottom = 520f
+
+        var pageIndex = 1
+        var pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageIndex).create()
+        var page = document.startPage(pageInfo)
+        var canvas = page.canvas
+
+        fun drawHeaderBanner(c: android.graphics.Canvas, pIndex: Int) {
+            paint.color = Color.parseColor("#17365D")
+            c.drawRect(0f, 0f, pageWidth.toFloat(), 75f, paint)
+
+            paint.color = Color.WHITE
+            paint.textSize = 20f
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            c.drawText("UWAPO MEMBERSHIP CLUB", marginLeft, 36f, paint)
+
+            paint.textSize = 12f
+            paint.typeface = Typeface.DEFAULT
+            c.drawText("MEMBER CONTRIBUTIONS REPORT — $termTitle $year (A4 Landscape)", marginLeft, 58f, paint)
+
+            val dateStr = SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault()).format(Date())
+            paint.textSize = 9f
+            c.drawText("Generated: $dateStr · Page $pIndex", 600f, 58f, paint)
+        }
+
+        fun drawTableHeader(c: android.graphics.Canvas, topY: Float) {
+            paint.color = Color.parseColor("#17365D")
+            c.drawRect(marginLeft, topY, marginRight, topY + 24f, paint)
+
+            paint.color = Color.WHITE
+            paint.textSize = 9.5f
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+
+            c.drawText("NO.", 35f, topY + 16f, paint)
+            c.drawText("FULL NAME & MEMBER NO", 70f, topY + 16f, paint)
+
+            val monthColX = listOf(275f, 340f, 405f, 470f, 535f, 600f)
+            monthLabels.take(6).forEachIndexed { idx, label ->
+                if (idx < monthColX.size) {
+                    c.drawText(label.uppercase(Locale.ROOT), monthColX[idx], topY + 16f, paint)
+                }
+            }
+
+            c.drawText("TOTAL (TZS)", 670f, topY + 16f, paint)
+        }
+
+        fun drawFooter(c: android.graphics.Canvas, pIndex: Int) {
+            paint.color = Color.LTGRAY
+            paint.strokeWidth = 1f
+            c.drawLine(marginLeft, 540f, marginRight, 540f, paint)
+
+            paint.color = Color.DKGRAY
+            paint.textSize = 9f
+            paint.typeface = Typeface.DEFAULT
+            c.drawText("UWAPO Management System · Official Term Contribution Report", marginLeft, 555f, paint)
+            c.drawText("Page $pIndex", 750f, 555f, paint)
+        }
+
+        drawHeaderBanner(canvas, pageIndex)
+
+        var y = 90f
+        drawTableHeader(canvas, y)
+        y += 24f
+
+        val monthColX = listOf(275f, 340f, 405f, 470f, 535f, 600f)
+        val numFormat = NumberFormat.getIntegerInstance(Locale("en", "TZ"))
+
+        memberRows.forEachIndexed { idx, row ->
+            if (y > marginBottom) {
+                drawFooter(canvas, pageIndex)
+                document.finishPage(page)
+
+                pageIndex++
+                pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageIndex).create()
+                page = document.startPage(pageInfo)
+                canvas = page.canvas
+
+                drawHeaderBanner(canvas, pageIndex)
+                y = 90f
+                drawTableHeader(canvas, y)
+                y += 24f
+            }
+
+            y += 18f
+
+            if (idx % 2 == 1) {
+                paint.color = Color.parseColor("#F9FAFC")
+                canvas.drawRect(marginLeft, y - 14f, marginRight, y + 4f, paint)
+            }
+
+            paint.color = Color.BLACK
+            paint.textSize = 9f
+            paint.typeface = Typeface.DEFAULT
+
+            canvas.drawText("${idx + 1}", 35f, y, paint)
+
+            val displayName = "${row.fullName} (${row.memberNo})"
+            val truncatedName = if (displayName.length > 32) displayName.take(30) + ".." else displayName
+            canvas.drawText(truncatedName, 70f, y, paint)
+
+            row.monthlyAmounts.take(6).forEachIndexed { mIdx, amt ->
+                if (mIdx < monthColX.size) {
+                    val txt = if (amt <= 0) "-" else numFormat.format(amt)
+                    canvas.drawText(txt, monthColX[mIdx], y, paint)
+                }
+            }
+
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            val totalTxt = if (row.totalAmount <= 0) "0" else numFormat.format(row.totalAmount)
+            canvas.drawText(totalTxt, 670f, y, paint)
+
+            paint.color = Color.LTGRAY
+            paint.strokeWidth = 0.5f
+            canvas.drawLine(marginLeft, y + 4f, marginRight, y + 4f, paint)
+        }
+
+        y += 22f
+        if (y > marginBottom) {
+            drawFooter(canvas, pageIndex)
+            document.finishPage(page)
+
+            pageIndex++
+            pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageIndex).create()
+            page = document.startPage(pageInfo)
+            canvas = page.canvas
+
+            drawHeaderBanner(canvas, pageIndex)
+            y = 110f
+        }
+
+        paint.color = Color.parseColor("#E8EEF5")
+        canvas.drawRect(marginLeft, y - 14f, marginRight, y + 8f, paint)
+
+        paint.color = Color.parseColor("#17365D")
+        paint.textSize = 10f
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        canvas.drawText("GRAND TOTAL (TZS)", 70f, y, paint)
+
+        grandTotalMonthly.take(6).forEachIndexed { mIdx, sumAmt ->
+            if (mIdx < monthColX.size) {
+                val txt = if (sumAmt <= 0) "0" else numFormat.format(sumAmt)
+                canvas.drawText(txt, monthColX[mIdx], y, paint)
+            }
+        }
+
+        val grandTotalTxt = money(grandTotalTerm)
+        canvas.drawText(grandTotalTxt, 670f, y, paint)
+
+        drawFooter(canvas, pageIndex)
+        document.finishPage(page)
+
+        val file = File(context.cacheDir, "term_report_${year}_${termTitle.take(6).lowercase().replace(' ', '_')}_${System.currentTimeMillis()}.pdf")
+        FileOutputStream(file).use { out -> document.writeTo(out) }
+        document.close()
+        return file
+    }
+
     fun sharePdf(context: Context, file: File, chooserTitle: String = "Share PDF") {
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
         val intent = Intent(Intent.ACTION_SEND).apply {
