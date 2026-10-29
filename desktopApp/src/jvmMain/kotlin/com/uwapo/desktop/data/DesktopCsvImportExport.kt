@@ -88,6 +88,33 @@ object DesktopCsvImportExport {
             .lowercase(Locale.ROOT)
     }
 
+    private fun editDistance(a: String, b: String): Int {
+        val dp = IntArray(b.length + 1) { it }
+        for (i in 1..a.length) {
+            var prev = dp[0]
+            dp[0] = i
+            for (j in 1..b.length) {
+                val tmp = dp[j]
+                dp[j] = minOf(dp[j] + 1, dp[j - 1] + 1, prev + if (a[i - 1] == b[j - 1]) 0 else 1)
+                prev = tmp
+            }
+        }
+        return dp[b.length]
+    }
+
+    /** Same person written slightly differently (typos like MARUA/MARUWA, or a middle name shortened to an initial). */
+    private fun namesLikelySame(a: String, b: String): Boolean {
+        if (a.length >= 8 && b.length >= 8 && editDistance(a, b) <= 2) return true
+        val ta = a.split(" ").filter { it.isNotBlank() }
+        val tb = b.split(" ").filter { it.isNotBlank() }
+        if (ta.size < 2 || tb.size < 2 || ta.size == tb.size && ta == tb) return ta == tb
+        if (ta.first() != tb.first() || ta.last() != tb.last()) return false
+        val midA = ta.drop(1).dropLast(1)
+        val midB = tb.drop(1).dropLast(1)
+        val (short, long) = if (midA.size <= midB.size) midA to midB else midB to midA
+        return short.all { sm -> long.any { lm -> lm.startsWith(sm) || sm.startsWith(lm) } }
+    }
+
     private fun findOrRegisterMember(
         existingMembers: MutableList<MemberEntity>,
         num: String,
@@ -100,9 +127,11 @@ object DesktopCsvImportExport {
         val normName = normalizeMemberName(fullName)
         val matchedByName = if (normName.isNotBlank()) {
             existingMembers.find { normalizeMemberName(it.fullName) == normName }
+                ?: existingMembers.find { namesLikelySame(normalizeMemberName(it.fullName), normName) }
         } else null
 
-        val matchedByNum = if (matchedByName == null && num.isNotBlank()) {
+        // Member numbers differ between sheets, so only use them when the row has no name.
+        val matchedByNum = if (matchedByName == null && normName.isBlank() && num.isNotBlank()) {
             existingMembers.find { it.memberNo == num }
         } else null
 
@@ -111,7 +140,11 @@ object DesktopCsvImportExport {
             return Pair(matched, false)
         }
 
-        val memberNo = num.ifBlank { fullName.replace(" ", "_").take(15) }
+        var memberNo = num.ifBlank { fullName.replace(" ", "_").take(15) }
+        if (existingMembers.any { it.memberNo == memberNo }) {
+            val maxNo = existingMembers.mapNotNull { it.memberNo.toIntOrNull() }.maxOrNull() ?: 0
+            memberNo = (maxNo + 1).toString()
+        }
         val memberId = UUID.nameUUIDFromBytes("UWAPO-MEMBER:$memberNo".toByteArray(Charsets.UTF_8)).toString()
         val joinDate = LocalDate.of(year, 7, 1)
         val newMember = MemberEntity(
@@ -148,17 +181,12 @@ object DesktopCsvImportExport {
                 }
             }
 
+            // Only month-header columns are payments; the JUMLA (total) column must never be read as a month.
             val monthCols = detectedCols.toMutableMap()
-            if (sheetIdx == 0) {
-                val defaultTerm1Map = mapOf(3 to 1, 4 to 2, 5 to 3, 6 to 4, 7 to 5, 2 to 6)
-                for ((c, m) in defaultTerm1Map) {
-                    if (c !in monthCols) monthCols[c] = m
-                }
-            } else if (sheetIdx == 1) {
-                val defaultTerm2Map = mapOf(2 to 7, 3 to 8, 4 to 9, 5 to 10, 6 to 11, 7 to 12)
-                for ((c, m) in defaultTerm2Map) {
-                    if (c !in monthCols) monthCols[c] = m
-                }
+            if (monthCols.isEmpty()) {
+                val fallback = if (sheetIdx == 0) mapOf(1 to 1, 2 to 2, 3 to 3, 4 to 4, 5 to 5, 6 to 6)
+                else mapOf(1 to 7, 2 to 8, 3 to 9, 4 to 10, 5 to 11, 6 to 12)
+                monthCols.putAll(fallback)
             }
 
             if (monthCols.isEmpty()) continue
