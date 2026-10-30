@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.uwapo.app"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.uwapo.app"
@@ -32,6 +32,15 @@ android {
 
 ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
+}
+
+configurations.all {
+    resolutionStrategy.force(
+        "org.jetbrains.kotlin:kotlin-stdlib:2.0.21",
+        "org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.0.21",
+        "org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.0.21",
+        "org.jetbrains.kotlin:kotlin-stdlib-common:2.0.21"
+    )
 }
 
 dependencies {

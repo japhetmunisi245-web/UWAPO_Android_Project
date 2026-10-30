@@ -18,6 +18,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Assessment
+import androidx.compose.material.icons.filled.Brightness4
+import androidx.compose.material.icons.filled.Brightness7
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
@@ -96,7 +98,11 @@ private fun methodLabel(method: String): String = when (method) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun UWAPORoot(dao: UWAPODao) {
+fun UWAPORoot(
+    dao: UWAPODao,
+    isDarkTheme: Boolean = false,
+    onToggleTheme: () -> Unit = {}
+) {
     val context = LocalContext.current
     var currentLanguage by rememberSaveable {
         mutableStateOf(if (Locale.getDefault().language == "sw") "sw" else "en")
@@ -235,6 +241,13 @@ fun UWAPORoot(dao: UWAPODao) {
                     }
                 },
                 actions = {
+                    IconButton(onClick = onToggleTheme) {
+                        Icon(
+                            if (isDarkTheme) Icons.Default.Brightness7 else Icons.Default.Brightness4,
+                            contentDescription = "Toggle Light/Dark Theme",
+                            tint = MaterialTheme.colorScheme.onPrimary
+                        )
+                    }
                     OutlinedButton(
                         onClick = { currentLanguage = if (currentLanguage == "sw") "en" else "sw" },
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
@@ -258,6 +271,13 @@ fun UWAPORoot(dao: UWAPODao) {
                         expanded = showTopMenu,
                         onDismissRequest = { showTopMenu = false }
                     ) {
+                        DropdownMenuItem(
+                            text = { Text(if (isDarkTheme) "Switch to Light Theme" else "Switch to Dark Theme") },
+                            onClick = {
+                                showTopMenu = false
+                                onToggleTheme()
+                            }
+                        )
                         DropdownMenuItem(
                             text = { Text("Database Maintenance & Backups") },
                             onClick = {

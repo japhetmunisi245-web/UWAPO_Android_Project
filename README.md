@@ -1,44 +1,80 @@
-# UWAPO Batch Year Isolation Fix
+# UWAPO Android — Committee-Ready Reporting Edition
 
-This ZIP is a **patch package**, not the complete Android project and not a prebuilt APK.
+Native Android membership and contribution management application for **UWAPO**. Designed for local-only, secure, offline operation on Android devices with complete Room/SQLite storage and professional committee reporting.
 
-## What it fixes
+## 1. Local-Only Architecture
+- **Target Platform**: Android (Kotlin, Jetpack Compose, Material 3).
+- **Storage**: Room / SQLite local database with SQLCipher encrypted passphrase support.
+- **Security & Privacy**: No cloud dependencies, no remote servers, no external API calls, and no remote synchronization workers.
+- **Local Features**:
+  - Member management and profile history.
+  - Payment entry, receipt generation, and payment reversal.
+  - Expense tracking with local approval workflow (`pending_approval`, `approved`, `paid`, `rejected`).
+  - Automated local database backups via `ScheduledBackupWorker`.
+  - CSV import/export for batch records.
 
-### 1. Batch 2026 showing 2025 members/contributions
-The Term overview and Term details were filtering payments against all member IDs in the database. The patch restricts members, totals, and paid/partial/pending counts to members whose `batchYear` matches the selected batch.
+## 2. Monthly and Annual Committee Reporting
+The app provides a reporting hub supporting two distinct reporting periods:
 
-### 2. A ledger without a year silently becoming the current year
-The matrix Excel importer previously fell back to `LocalDate.now().year` when it could not detect a year in the spreadsheet's first rows. A 2025 ledger without a visible year could therefore be imported as 2026 when using the general import action. The patch changes this to a clear error instead of silently assigning the current year.
+### Monthly Reports
+- **Selected Month Collections**: Total recorded payments for the selected contribution month and year (`periodMonth` & `periodYear`), excluding reversed transactions.
+- **Approved Monthly Expenses**: Total expenses with status `paid` or `approved` recorded during that specific month/year based on `expenseDate`.
+- **Monthly Net Movement**: `Collections - Included Expenses`.
+- **Expected Monthly Contributions**: `Active Member Count × TZS 10,000`.
+- **Estimated Outstanding Arrears**: Estimated shortfall (`Expected - Collections`).
+- **Members in Arrears List**: Active members who have pending contributions for the selected month, with quick SMS reminder options.
 
-## Apply on Windows
+### Annual Reports
+- **Annual Collections**: Sum of non-reversed payments recorded for the selected year (`periodYear`).
+- **Annual Approved Expenses**: Sum of expenses approved/paid during that year (`expenseDate`).
+- **Annual Net Movement**: `Annual Collections - Annual Expenses`.
+- **Expected Annual Contributions**: `Active Member Count × TZS 120,000`.
+- **Monthly Collection Breakdown**: Month-by-month contribution summary table (January to December).
+- **Annual Arrears Summary**: Active members with annual totals below the expected requirement.
 
-1. Extract this ZIP.
-2. Open PowerShell in the extracted folder.
-3. Run the script with your project folder path:
+## 3. Professional Multi-Page PDF Reports
+PDF generation in `PdfGenerator.kt` provides committee-ready PDF documents:
+- **UWAPO Navy & White Design**: Header banner with branding, subtitle, and generation timestamp.
+- **Multi-Page Pagination Engine**: Automatically splits long content across multiple A4 pages without truncating data.
+- **Repeated Table Headers**: Tables spanning across pages automatically repeat header titles on subsequent pages.
+- **Footer Page Numbering**: Each page includes "UWAPO Management System · Page X of Y".
+- **Committee Sign-Off Block**: Dedicated preparation, review, and approval signature lines on the final page of financial reports:
+  ```
+  Prepared by: ________________________   Date: ______________
+  Reviewed by: ________________________   Date: ______________
+  Approved by: ________________________   Date: ______________
+  ```
 
-```powershell
-python .\apply_batch_year_fix.py "C:\Users\JEFF\OneDrive\Documents\UWAPO_Android_Project"
-```
+## 4. Member Statements
+Individual member statements generated from profile dialogs feature:
+- Complete payment history without row limits or truncation.
+- Columns: Date (`dd/MM/yyyy`), Contribution Period (`MM/YYYY`), Method, Receipt No., Status, and Amount (TZS).
+- Clear identification and exclusion of `REVERSED` payments from totals.
+- Multi-page support with repeated headers and footer page numbering.
 
-The script creates backup files beside both Kotlin files and refuses to overwrite existing backups.
+## 5. Financial Safeguards & Principles
+- **Net Movement**: Calculated strictly as `Collections - Approved Expenses`.
+- **Expense Exclusion**: Pending and rejected expenses are excluded from financial totals.
+- **Reversal Exclusion**: Reversed payments are excluded from collection totals.
+- **Period Integrity**: Payments are filtered by contribution period (`periodYear`/`periodMonth`), whereas expenses are filtered by recorded expense date (`expenseDate`).
 
-## Correct import workflow
+## 6. Build Instructions
+1. Install Android Studio (Ladybug or later), Android SDK 35, and JDK 17.
+2. Open the project root folder in Android Studio.
+3. Allow Gradle sync to complete.
+4. Execute unit tests:
+   ```bash
+   ./gradlew :app:testDebugUnitTest
+   ```
+5. Assemble debug APK:
+   ```bash
+   ./gradlew :app:assembleDebug
+   ```
+6. The debug APK will be generated at `app/build/outputs/apk/debug/app-debug.apk`.
 
-- Select Batch **2025**, then use that batch's import action with the 2025 workbook.
-- Select Batch **2026**, then use that batch's import action with the 2026 workbook.
-- Do not import a 2025 workbook into the 2026 batch.
-- Export/back up current records before re-importing. This patch does not automatically delete or correct records already imported into the wrong year.
-
-## Build
-
-In PowerShell at the project root:
-
-```powershell
-.\gradlew.bat assembleDebug
-```
-
-The debug APK is normally created at:
-
-`app\build\outputs\apk\debug\app-debug.apk`
-
-Compilation has not been run by this patch package; build and test it locally before using it for official contribution records.
+## 7. Manual Verification Procedures
+1. **Reporting Switch**: Open Reports tab and toggle between "Monthly Report" and "Annual Report". Verify totals recalculate accurately.
+2. **PDF Generation**: Generate PDF reports for both Monthly and Annual views. Verify pagination, repeated headers, page numbers, and committee sign-off block.
+3. **Member Statement PDF**: Open a member's profile and export PDF statement. Verify all historical payment records are displayed without truncation.
+4. **CSV Import/Export**: Import a member register CSV and export backup CSV from the Reports tab.
+5. **Database Persistence**: Restart the app and confirm local Room records survive app restarts.

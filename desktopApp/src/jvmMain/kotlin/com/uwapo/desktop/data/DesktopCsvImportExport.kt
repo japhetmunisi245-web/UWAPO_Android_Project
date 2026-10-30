@@ -13,14 +13,7 @@ import java.util.zip.ZipInputStream
 import javax.xml.parsers.DocumentBuilderFactory
 
 object DesktopCsvImportExport {
-    data class ImportResult(
-        val membersAdded: Int,
-        val paymentsAdded: Int,
-        val rowsSkipped: Int,
-        val sheetDeclaredTotal: Long? = null,
-        val calculatedTotal: Long = 0L,
-        val totalMismatchWarning: String? = null
-    )
+    data class ImportResult(val membersAdded: Int, val paymentsAdded: Int, val rowsSkipped: Int)
 
     private val MONTH_MAP = mapOf(
         "january" to 1, "jan" to 1, "januari" to 1,
@@ -57,21 +50,65 @@ object DesktopCsvImportExport {
         return lines.joinToString("\r\n") + "\r\n"
     }
 
-    fun importFile(file: File, db: DesktopDatabase, targetStartYear: Int? = null): ImportResult {
-        return file.inputStream().use { importStream(it, db, targetStartYear) }
+    /**
+     * What an import WOULD do. Building a plan reads the file and the database but writes nothing,
+     * so the user can review it (and reconcile it against the sheet's own totals) before committing.
+     */
+    data class ImportPlan(
+        val newMembers: List<MemberEntity>,
+        val payments: List<PaymentEntity>,
+        val paymentsAlreadyInDb: Int,
+        val notes: List<String>,
+        val warnings: List<String>,
+        val sheetTotal: Long?,
+        val rowsSkipped: Int
+    ) {
+        val computedTotal: Long get() = payments.sumOf { it.amountTzs }
+        val newPayments: Int get() = payments.size - paymentsAlreadyInDb
+        /** True when there is no sheet total to compare against, or when it equals what the import computes. */
+        val reconciles: Boolean get() = sheetTotal == null || sheetTotal == computedTotal
+        val isEmpty: Boolean get() = newMembers.isEmpty() && payments.isEmpty()
     }
 
-    fun importStream(input: InputStream, db: DesktopDatabase, targetStartYear: Int? = null): ImportResult {
+    private const val LARGE_AMOUNT = 20_000L
+
+    private fun emptyPlan(message: String) = ImportPlan(emptyList(), emptyList(), 0, emptyList(), listOf(message), null, 0)
+
+    fun planFile(file: File, db: DesktopDatabase, targetStartYear: Int? = null): ImportPlan {
+        return file.inputStream().use { planStream(it, db, targetStartYear) }
+    }
+
+    fun planStream(input: InputStream, db: DesktopDatabase, targetStartYear: Int? = null): ImportPlan {
         val sheets = parseInputSheets(input)
-        if (sheets.isEmpty() || sheets.all { it.isEmpty() }) return ImportResult(0, 0, 0)
+        if (sheets.isEmpty() || sheets.all { it.isEmpty() }) return emptyPlan("The file has no readable rows.")
 
         val isMatrix = sheets.any { sheetHasMatrixHeader(it) }
         return if (isMatrix) {
-            importMatrixLedger(sheets, db, targetStartYear)
+            planMatrixLedger(sheets, db, targetStartYear)
         } else {
-            importStandardRows(sheets.flatten(), db, targetStartYear)
+            planStandardRows(sheets.flatten(), db, targetStartYear)
         }
     }
+
+    /** Saves a reviewed plan: one backup, one transaction, one screen refresh. */
+    fun commit(plan: ImportPlan, db: DesktopDatabase): ImportResult {
+        val (members, payments) = db.importBatch(plan.newMembers, plan.payments)
+        return ImportResult(members, payments, plan.rowsSkipped)
+    }
+
+    fun importFile(file: File, db: DesktopDatabase, targetStartYear: Int? = null): ImportResult =
+        commit(planFile(file, db, targetStartYear), db)
+
+    fun importStream(input: InputStream, db: DesktopDatabase, targetStartYear: Int? = null): ImportResult =
+        commit(planStream(input, db, targetStartYear), db)
+
+    private fun tzs(amount: Long): String = "TZS " + java.text.NumberFormat.getIntegerInstance(Locale.US).format(amount)
+
+    private fun parseAmount(cell: String?): Long =
+        cell?.replace(",", "")?.replace("TZS", "", ignoreCase = true)?.trim()?.toDoubleOrNull()?.toLong() ?: 0L
+
+    private fun monthShort(month: Int): String =
+        java.time.Month.of(month).getDisplayName(java.time.format.TextStyle.SHORT, Locale.ENGLISH)
 
     private fun sheetHasMatrixHeader(sheet: List<List<String>>): Boolean {
         for (row in sheet.take(50)) {
@@ -95,62 +132,87 @@ object DesktopCsvImportExport {
             .lowercase(Locale.ROOT)
     }
 
-    private fun editDistance(a: String, b: String): Int {
-        val dp = IntArray(b.length + 1) { it }
+    private fun editSimilarity(a: String, b: String): Double {
+        if (a == b) return 1.0
+        if (a.isEmpty() || b.isEmpty()) return 0.0
+        val row = IntArray(b.length + 1) { it }
         for (i in 1..a.length) {
-            var prev = dp[0]
-            dp[0] = i
+            var diagonal = row[0]
+            row[0] = i
             for (j in 1..b.length) {
-                val tmp = dp[j]
-                dp[j] = minOf(dp[j] + 1, dp[j - 1] + 1, prev + if (a[i - 1] == b[j - 1]) 0 else 1)
-                prev = tmp
+                val above = row[j]
+                val cost = if (a[i - 1] == b[j - 1]) 0 else 1
+                row[j] = minOf(row[j] + 1, row[j - 1] + 1, diagonal + cost)
+                diagonal = above
             }
         }
-        return dp[b.length]
+        return 1.0 - row[b.length].toDouble() / maxOf(a.length, b.length)
     }
 
-    /** Same person written slightly differently (typos like MARUA/MARUWA, or a middle name shortened to an initial). */
-    private fun namesLikelySame(a: String, b: String): Boolean {
-        if (a.length >= 8 && b.length >= 8 && editDistance(a, b) <= 2) return true
-        val ta = a.split(" ").filter { it.isNotBlank() }
-        val tb = b.split(" ").filter { it.isNotBlank() }
-        if (ta.size < 2 || tb.size < 2 || ta.size == tb.size && ta == tb) return ta == tb
+    /** True when two normalized names are the same person written slightly differently (typo, initial vs full middle name). */
+    private fun namesMatch(a: String, b: String): Boolean {
+        if (a.isBlank() || b.isBlank()) return false
+        if (a == b) return true
+        if (editSimilarity(a, b) >= 0.88) return true
+        val ta = a.split(" ")
+        val tb = b.split(" ")
+        if (ta.size < 2 || tb.size < 2) return false
         if (ta.first() != tb.first() || ta.last() != tb.last()) return false
-        val midA = ta.drop(1).dropLast(1)
-        val midB = tb.drop(1).dropLast(1)
-        val (short, long) = if (midA.size <= midB.size) midA to midB else midB to midA
-        return short.all { sm -> long.any { lm -> lm.startsWith(sm) || sm.startsWith(lm) } }
+        val ma = ta.drop(1).dropLast(1)
+        val mb = tb.drop(1).dropLast(1)
+        if (ma.isEmpty() || mb.isEmpty()) return true
+        return ma.size == mb.size && ma.zip(mb).all { (x, y) ->
+            x == y || (x.length == 1 && y.startsWith(x)) || (y.length == 1 && x.startsWith(y))
+        }
     }
 
+    private fun nextFreeMemberNo(existingMembers: List<MemberEntity>): String {
+        val used = existingMembers.map { it.memberNo }.toSet()
+        var candidate = (existingMembers.mapNotNull { it.memberNo.toIntOrNull() }.maxOrNull() ?: 0) + 1
+        while (candidate.toString() in used) candidate++
+        return candidate.toString()
+    }
+
+    /**
+     * [numberIsStable] = true for CSV/standard files where member_no is a real ID.
+     * Ledger sheets number rows by position and renumber between sheets, so there the
+     * number must never be used to decide who a row belongs to.
+     * Nothing is written here: new members are only collected into [newMembers].
+     */
     private fun findOrRegisterMember(
         existingMembers: MutableList<MemberEntity>,
+        newMembers: MutableList<MemberEntity>,
+        notes: MutableList<String>,
         num: String,
         fullName: String,
         year: Int,
         phone: String = "",
         status: String = "active",
-        db: DesktopDatabase
+        numberIsStable: Boolean = true
     ): Pair<MemberEntity, Boolean> {
         val normName = normalizeMemberName(fullName)
         val matchedByName = if (normName.isNotBlank()) {
             existingMembers.find { normalizeMemberName(it.fullName) == normName }
-                ?: existingMembers.find { namesLikelySame(normalizeMemberName(it.fullName), normName) }
+                ?: existingMembers.find { namesMatch(normalizeMemberName(it.fullName), normName) }
         } else null
 
-        // Member numbers differ between sheets, so only use them when the row has no name.
-        val matchedByNum = if (matchedByName == null && normName.isBlank() && num.isNotBlank()) {
+        val matchedByNum = if (matchedByName == null && numberIsStable && num.isNotBlank()) {
             existingMembers.find { it.memberNo == num }
         } else null
 
         val matched = matchedByName ?: matchedByNum
         if (matched != null) {
+            if (matchedByName != null && normalizeMemberName(matched.fullName) != normName) {
+                notes.add("\"${fullName.trim()}\" treated as the same person as \"${matched.fullName.trim()}\" (No. ${matched.memberNo})")
+            }
             return Pair(matched, false)
         }
 
         var memberNo = num.ifBlank { fullName.replace(" ", "_").take(15) }
-        if (existingMembers.any { it.memberNo == memberNo }) {
-            val maxNo = existingMembers.mapNotNull { it.memberNo.toIntOrNull() }.maxOrNull() ?: 0
-            memberNo = (maxNo + 1).toString()
+        if (!numberIsStable && existingMembers.any { it.memberNo == memberNo }) {
+            val reassigned = nextFreeMemberNo(existingMembers)
+            notes.add("New member \"${fullName.trim()}\": number $memberNo already belongs to someone else, assigned No. $reassigned")
+            memberNo = reassigned
         }
         val memberId = UUID.nameUUIDFromBytes("UWAPO-MEMBER:$memberNo".toByteArray(Charsets.UTF_8)).toString()
         val joinDate = LocalDate.of(year, 7, 1)
@@ -164,20 +226,43 @@ object DesktopCsvImportExport {
             syncStatus = "pending"
         )
 
-        db.insertMember(newMember)
         existingMembers.add(newMember)
+        newMembers.add(newMember)
         return Pair(newMember, true)
     }
 
-    private fun importMatrixLedger(sheets: List<List<List<String>>>, db: DesktopDatabase, targetStartYear: Int? = null): ImportResult {
+    private fun buildWarnings(
+        warnings: MutableList<String>,
+        largeAmounts: List<String>,
+        rowMismatches: List<String>
+    ) {
+        if (rowMismatches.isNotEmpty()) {
+            warnings.add(
+                "${rowMismatches.size} row(s) where the sheet's own row total does not match its months: " +
+                    rowMismatches.take(5).joinToString("; ") + if (rowMismatches.size > 5) "; ..." else ""
+            )
+        }
+        if (largeAmounts.isNotEmpty()) {
+            warnings.add(
+                "${largeAmounts.size} payment(s) above ${tzs(LARGE_AMOUNT)} for a single month (usual is TZS 10,000): " +
+                    largeAmounts.take(5).joinToString("; ") + if (largeAmounts.size > 5) "; ..." else ""
+            )
+        }
+    }
+
+    private fun planMatrixLedger(sheets: List<List<List<String>>>, db: DesktopDatabase, targetStartYear: Int? = null): ImportPlan {
         val year = targetStartYear ?: detectYear(sheets)
         db.refreshMembers()
         val existingMembers = db.members.value.toMutableList()
-        var membersAdded = 0
-        var paymentsAdded = 0
-        var calculatedTotal = 0L
-        var sheetDeclaredTotal: Long? = null
-        val skipped = 0
+        val newMembers = mutableListOf<MemberEntity>()
+        val notes = mutableListOf<String>()
+        val warnings = mutableListOf<String>()
+        val payments = LinkedHashMap<String, PaymentEntity>()
+        val largeAmounts = mutableListOf<String>()
+        val rowMismatches = mutableListOf<String>()
+        var sheetTotalSum = 0L
+        var sheetsWithTotal = 0
+        var sheetsRead = 0
 
         for ((sheetIdx, sheet) in sheets.withIndex()) {
             val detectedCols = mutableMapOf<Int, Int>()
@@ -190,15 +275,28 @@ object DesktopCsvImportExport {
                 }
             }
 
-            // Only month-header columns are payments; the JUMLA (total) column must never be read as a month.
-            val monthCols = detectedCols.toMutableMap()
-            if (monthCols.isEmpty()) {
-                val fallback = if (sheetIdx == 0) mapOf(1 to 1, 2 to 2, 3 to 3, 4 to 4, 5 to 5, 6 to 6)
-                else mapOf(1 to 7, 2 to 8, 3 to 9, 4 to 10, 5 to 11, 6 to 12)
-                monthCols.putAll(fallback)
+            // Columns headed JUMLA / TOTAL hold row sums, never a month's payment.
+            val totalCols = mutableSetOf<Int>()
+            for (row in sheet.take(20)) {
+                for ((cIdx, cell) in row.withIndex()) {
+                    if (cIdx > 0 && cell.trim().uppercase(Locale.ROOT) in listOf("JUMLA", "JUMLA ADA", "TOTAL")) totalCols.add(cIdx)
+                }
+            }
+
+            val monthCols = detectedCols.filterKeys { it !in totalCols }.toMutableMap()
+            // Positional fallbacks only fill months whose header was NOT found, and never a total column.
+            val fallbackMap = when (sheetIdx) {
+                0 -> mapOf(3 to 1, 4 to 2, 5 to 3, 6 to 4, 7 to 5, 2 to 6)
+                1 -> mapOf(2 to 7, 3 to 8, 4 to 9, 5 to 10, 6 to 11, 7 to 12)
+                else -> emptyMap()
+            }
+            for ((c, m) in fallbackMap) {
+                if (c !in monthCols && c !in totalCols && m !in monthCols.values) monthCols[c] = m
             }
 
             if (monthCols.isEmpty()) continue
+            sheetsRead++
+            var foundTotalRow = false
 
             var currentNum = ""
             var currentName = ""
@@ -206,9 +304,11 @@ object DesktopCsvImportExport {
 
             fun commitBlock() {
                 val name = currentName.ifBlank { currentNum }
-                if (name.isNotBlank() && blockMonthPayments.isNotEmpty()) {
-                    val (actualMember, isNew) = findOrRegisterMember(existingMembers, currentNum, name, year, db = db)
-                    if (isNew) membersAdded++
+                // A named member with no payments still must exist - they are exactly who shows up in arrears.
+                if (name.isNotBlank() && (blockMonthPayments.isNotEmpty() || currentName.isNotBlank())) {
+                    val (actualMember, _) = findOrRegisterMember(
+                        existingMembers, newMembers, notes, currentNum, name, year, numberIsStable = false
+                    )
                     val memberNo = actualMember.memberNo
 
                     for ((monthNum, amount) in blockMonthPayments) {
@@ -217,14 +317,14 @@ object DesktopCsvImportExport {
                             val receipt = "IMPORT-$memberNo-$year-${monthNum.toString().padStart(2, '0')}"
                             val key = "$memberNo|$year|$monthNum|$amount|$paidDate|$receipt"
                             val paymentId = UUID.nameUUIDFromBytes("UWAPO-PAYMENT:$key".toByteArray(Charsets.UTF_8)).toString()
-                            val payment = PaymentEntity(
+                            payments[paymentId] = PaymentEntity(
                                 paymentId, actualMember.id, amount, year, monthNum,
                                 paidDate.atStartOfDay(ZoneId.of("Africa/Dar_es_Salaam")).toInstant().toEpochMilli(),
                                 "cash", receipt, paymentId, "pending"
                             )
-                            db.insertPayment(payment)
-                            paymentsAdded++
-                            calculatedTotal += amount
+                            if (amount > LARGE_AMOUNT) {
+                                largeAmounts.add("${actualMember.fullName.trim()} ${monthShort(monthNum)} ${tzs(amount)}")
+                            }
                         }
                     }
                 }
@@ -237,20 +337,15 @@ object DesktopCsvImportExport {
                 val rawCell = row.getOrNull(0)?.trim() ?: ""
                 val rawUpper = rawCell.uppercase(Locale.ROOT)
 
-                if (rawUpper in listOf("TOTAL", "JUMLA", "JUNE", "JINA", "ADA", "JUMLA ADA", "JULY", "AUG", "SEPT", "OCT", "NOV", "DEC") || rawUpper.startsWith("TOTAL") || rawUpper.startsWith("JUMLA")) {
-                    if (rawUpper in listOf("TOTAL", "JUMLA", "JUMLA ADA") || rawUpper.startsWith("TOTAL") || rawUpper.startsWith("JUMLA")) {
+                if (rawUpper in listOf("TOTAL", "JUMLA", "JUNE", "JINA", "ADA", "JUMLA ADA", "JULY", "AUG", "SEPT", "OCT", "NOV", "DEC")) {
+                    if (rawUpper in listOf("TOTAL", "JUMLA", "JUMLA ADA")) {
                         commitBlock()
-                        val monthColSums = monthCols.mapNotNull { (cIdx, _) ->
-                            row.getOrNull(cIdx)?.replace(",", "")?.trim()?.toDoubleOrNull()?.toLong()
-                        }.filter { it > 0 }
-                        if (monthColSums.isNotEmpty()) {
-                            val sum = monthColSums.sum()
-                            if (sum > 0) sheetDeclaredTotal = (sheetDeclaredTotal ?: 0L) + sum
-                        } else {
-                            val allNums = row.mapNotNull { it.replace(",", "").trim().toDoubleOrNull()?.toLong() }.filter { it > 0 }
-                            if (allNums.isNotEmpty()) {
-                                sheetDeclaredTotal = (sheetDeclaredTotal ?: 0L) + allNums.maxOrNull()!!
-                            }
+                        // The sheet's own grand total: its total column, or else the month cells, of this row.
+                        val reported = totalCols.maxOfOrNull { parseAmount(row.getOrNull(it)) }?.takeIf { it > 0 }
+                            ?: monthCols.keys.sumOf { parseAmount(row.getOrNull(it)) }
+                        if (reported > 0) {
+                            sheetTotalSum += reported
+                            foundTotalRow = true
                         }
                     }
                     continue
@@ -269,31 +364,45 @@ object DesktopCsvImportExport {
                     if (name.isNotBlank()) currentName = name
                 }
 
+                var rowMonthSum = 0L
                 for ((cIdx, monthNum) in monthCols) {
-                    val amtStr = row.getOrNull(cIdx)?.replace(",", "")?.trim() ?: ""
-                    val amount = amtStr.toDoubleOrNull()?.toLong() ?: 0L
+                    val amount = parseAmount(row.getOrNull(cIdx))
+                    rowMonthSum += amount
                     if (amount > 0) {
                         val prev = blockMonthPayments[monthNum] ?: 0L
                         blockMonthPayments[monthNum] = maxOf(prev, amount)
                     }
                 }
+
+                // Single-row members: the sheet's own JUMLA for the row should equal the sum of its months.
+                if (isNameRow && num.isNotBlank() && totalCols.isNotEmpty()) {
+                    val reportedRow = totalCols.maxOf { parseAmount(row.getOrNull(it)) }
+                    if (reportedRow != rowMonthSum && (reportedRow > 0 || rowMonthSum > 0)) {
+                        rowMismatches.add("${name.trim()} (sheet ${tzs(reportedRow)}, months ${tzs(rowMonthSum)})")
+                    }
+                }
             }
 
             commitBlock()
+            if (foundTotalRow) sheetsWithTotal++
         }
 
-        val warning = if (sheetDeclaredTotal != null && sheetDeclaredTotal > 0 && calculatedTotal != sheetDeclaredTotal) {
-            val fmtDeclared = java.text.NumberFormat.getNumberInstance(Locale.US).format(sheetDeclaredTotal)
-            val fmtCalc = java.text.NumberFormat.getNumberInstance(Locale.US).format(calculatedTotal)
-            val diff = java.text.NumberFormat.getNumberInstance(Locale.US).format(kotlin.math.abs(sheetDeclaredTotal - calculatedTotal))
-            "Warning: Sheet TOTAL row shows TZS $fmtDeclared, but imported payments sum to TZS $fmtCalc (Difference: TZS $diff). Please verify sheet rows."
-        } else null
-
-        return ImportResult(membersAdded, paymentsAdded, skipped, sheetDeclaredTotal, calculatedTotal, warning)
+        buildWarnings(warnings, largeAmounts, rowMismatches)
+        val existingIds = db.existingPaymentIds()
+        val sheetTotal = if (sheetsRead > 0 && sheetsWithTotal == sheetsRead) sheetTotalSum else null
+        return ImportPlan(
+            newMembers = newMembers,
+            payments = payments.values.toList(),
+            paymentsAlreadyInDb = payments.keys.count { it in existingIds },
+            notes = notes.distinct(),
+            warnings = warnings,
+            sheetTotal = sheetTotal,
+            rowsSkipped = 0
+        )
     }
 
-    private fun importStandardRows(rows: List<List<String>>, db: DesktopDatabase, targetStartYear: Int? = null): ImportResult {
-        if (rows.isEmpty()) return ImportResult(0, 0, 0)
+    private fun planStandardRows(rows: List<List<String>>, db: DesktopDatabase, targetStartYear: Int? = null): ImportPlan {
+        if (rows.isEmpty()) return emptyPlan("The file has no readable rows.")
         val header = rows.first().map { it.trim().removePrefix("\uFEFF").lowercase(Locale.ROOT) }
         fun index(vararg names: String): Int = header.indexOfFirst { it in names }
         val iNo = index("member_no", "member number", "membership number", "member_id", "member id", "no", "no.")
@@ -310,14 +419,15 @@ object DesktopCsvImportExport {
         val iMethod = index("payment_method", "method", "payment method")
         val iReceipt = index("receipt_reference", "receipt_no", "receipt", "receipt no")
 
-        var membersAdded = 0
-        var paymentsAdded = 0
-        var calculatedTotal = 0L
-        var sheetDeclaredTotal: Long? = null
         var skipped = 0
-
         db.refreshMembers()
         val existingMembers = db.members.value.toMutableList()
+        val newMembers = mutableListOf<MemberEntity>()
+        val notes = mutableListOf<String>()
+        val warnings = mutableListOf<String>()
+        val payments = LinkedHashMap<String, PaymentEntity>()
+        val largeAmounts = mutableListOf<String>()
+
         rows.drop(1).forEach { row ->
             fun value(i: Int) = if (i >= 0 && i < row.size) row[i].trim() else ""
             val rawName = value(iName)
@@ -326,27 +436,18 @@ object DesktopCsvImportExport {
             val memberNo = cleanStr(if (rawNo.isNotBlank()) rawNo else numFromCell)
             val fullName = if (rawName.isNotBlank() && iName != iNo) rawName else nameFromCell
 
-            if (rawName.contains("TOTAL", ignoreCase = true) || rawName.contains("JUMLA", ignoreCase = true) ||
-                rawNo.contains("TOTAL", ignoreCase = true) || rawNo.contains("JUMLA", ignoreCase = true)) {
-                val declaredAmt = value(iAmount).replace(",", "").replace("TZS", "", ignoreCase = true).trim().toDoubleOrNull()?.toLong()
-                if (declaredAmt != null && declaredAmt > 0) {
-                    sheetDeclaredTotal = (sheetDeclaredTotal ?: 0L) + declaredAmt
-                }
-                return@forEach
-            }
-
             if (memberNo.isBlank() && fullName.isBlank()) { skipped++; return@forEach }
             val defaultJoinYear = targetStartYear ?: LocalDate.now().year
-            val (actualMember, isNew) = findOrRegisterMember(
+            val (actualMember, _) = findOrRegisterMember(
                 existingMembers = existingMembers,
+                newMembers = newMembers,
+                notes = notes,
                 num = memberNo,
                 fullName = fullName.ifBlank { memberNo },
                 year = defaultJoinYear,
                 phone = cleanStr(value(iPhone)),
-                status = value(iStatus).ifBlank { "active" }.lowercase(),
-                db = db
+                status = value(iStatus).ifBlank { "active" }.lowercase()
             )
-            if (isNew) membersAdded++
 
             val actualNo = actualMember.memberNo
             val amount = value(iAmount).replace(",", "").replace("TZS", "", ignoreCase = true).trim().let { it.toDoubleOrNull()?.toLong() ?: it.toLongOrNull() } ?: 0L
@@ -358,24 +459,30 @@ object DesktopCsvImportExport {
                 val receipt = value(iReceipt).ifBlank { "IMPORT-$actualNo-$year-${month.toString().padStart(2,'0')}" }
                 val key = "$actualNo|$year|$month|$amount|$paidDate|$receipt"
                 val paymentId = UUID.nameUUIDFromBytes("UWAPO-PAYMENT:$key".toByteArray(Charsets.UTF_8)).toString()
-                val payment = PaymentEntity(paymentId, actualMember.id, amount, year, month,
+                payments[paymentId] = PaymentEntity(
+                    paymentId, actualMember.id, amount, year, month,
                     paidDate.atStartOfDay(ZoneId.of("Africa/Dar_es_Salaam")).toInstant().toEpochMilli(),
                     if (method in listOf("cash", "bank", "mobile_money", "other")) method else "other",
-                    receipt, paymentId, "pending")
-                db.insertPayment(payment)
-                paymentsAdded++
-                calculatedTotal += amount
+                    receipt, paymentId, "pending"
+                )
+                if (amount > LARGE_AMOUNT) largeAmounts.add("${actualMember.fullName.trim()} ${monthShort(month)} ${tzs(amount)}")
+            } else if (amount > 0) {
+                skipped++
             }
         }
 
-        val warning = if (sheetDeclaredTotal != null && sheetDeclaredTotal > 0 && calculatedTotal != sheetDeclaredTotal) {
-            val fmtDeclared = java.text.NumberFormat.getNumberInstance(Locale.US).format(sheetDeclaredTotal)
-            val fmtCalc = java.text.NumberFormat.getNumberInstance(Locale.US).format(calculatedTotal)
-            val diff = java.text.NumberFormat.getNumberInstance(Locale.US).format(kotlin.math.abs(sheetDeclaredTotal - calculatedTotal))
-            "Warning: Sheet TOTAL row shows TZS $fmtDeclared, but imported payments sum to TZS $fmtCalc (Difference: TZS $diff). Please verify sheet rows."
-        } else null
-
-        return ImportResult(membersAdded, paymentsAdded, skipped, sheetDeclaredTotal, calculatedTotal, warning)
+        buildWarnings(warnings, largeAmounts, emptyList())
+        if (skipped > 0) warnings.add("$skipped row(s) were skipped (blank, or amount without a valid year/month).")
+        val existingIds = db.existingPaymentIds()
+        return ImportPlan(
+            newMembers = newMembers,
+            payments = payments.values.toList(),
+            paymentsAlreadyInDb = payments.keys.count { it in existingIds },
+            notes = notes.distinct(),
+            warnings = warnings,
+            sheetTotal = null,
+            rowsSkipped = skipped
+        )
     }
 
     private fun detectYear(sheets: List<List<List<String>>>): Int {
@@ -507,7 +614,7 @@ object DesktopCsvImportExport {
             e.printStackTrace()
         }
 
-        val sheets = mutableListOf<List<List<String>>>()
+        val numbered = mutableListOf<Pair<Int, List<List<String>>>>()
         try {
             ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
                 var entry = zip.nextEntry
@@ -517,7 +624,8 @@ object DesktopCsvImportExport {
                         val entryBytes = zip.readBytes()
                         val rows = parseSheet(ByteArrayInputStream(entryBytes), sharedStrings)
                         if (rows.isNotEmpty()) {
-                            sheets.add(rows)
+                            val sheetNumber = Regex("""sheet(\d+)\.xml$""").find(name)?.groupValues?.get(1)?.toIntOrNull() ?: Int.MAX_VALUE
+                            numbered.add(sheetNumber to rows)
                         }
                     }
                     entry = zip.nextEntry
@@ -526,7 +634,7 @@ object DesktopCsvImportExport {
         } catch (e: Exception) {
             e.printStackTrace()
         }
-        return sheets
+        return numbered.sortedBy { it.first }.map { it.second }
     }
 
     private fun parseSharedStrings(input: InputStream): List<String> {

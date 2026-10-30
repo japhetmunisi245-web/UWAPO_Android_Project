@@ -21,31 +21,8 @@ class CsvImportExportTest {
         override fun observeMembers(): Flow<List<MemberEntity>> = flowOf(members.values.toList())
         override fun observePayments(): Flow<List<PaymentEntity>> = flowOf(payments)
         override fun observeExpenses(): Flow<List<ExpenseEntity>> = flowOf(emptyList())
-        val batches = mutableMapOf<Int, BatchEntity>()
-        override fun observeBatches(): Flow<List<BatchEntity>> = flowOf(batches.values.sortedByDescending { it.year })
-        override suspend fun getAllBatchesSync(): List<BatchEntity> = batches.values.sortedByDescending { it.year }
-        override suspend fun insertBatchIgnore(batch: BatchEntity): Long {
-            return if (batches.containsKey(batch.year)) -1L else { batches[batch.year] = batch; 1L }
-        }
-        override suspend fun getMembersForBatchSync(batchYear: Int): List<MemberEntity> = members.values.filter { it.batchYear == batchYear }
-        override suspend fun updateMemberDetails(id: String, memberNo: String, fullName: String, phone: String, status: String, notes: String) {
-            members[id]?.let { members[id] = it.copy(memberNo = memberNo, fullName = fullName, phone = phone, status = status, notes = notes) }
-        }
-        override suspend fun deletePaymentsForBatch(batchYear: Int) {
-            val ids = members.values.filter { it.batchYear == batchYear }.map { it.id }.toSet()
-            payments.removeAll { it.memberId in ids }
-        }
-        override suspend fun deleteMembersForBatch(batchYear: Int) {
-            members.values.removeAll { it.batchYear == batchYear }
-        }
-        override suspend fun deleteBatchRow(batchYear: Int) { batches.remove(batchYear) }
-        override suspend fun deleteBatch(batchYear: Int) {
-            deletePaymentsForBatch(batchYear)
-            deleteMembersForBatch(batchYear)
-            deleteBatchRow(batchYear)
-        }
         override suspend fun getMember(id: String): MemberEntity? = members[id]
-        override suspend fun getMemberByNumber(batchYear: Int, memberNo: String): MemberEntity? = members.values.find { it.batchYear == batchYear && it.memberNo == memberNo }
+        override suspend fun getMemberByNumber(memberNo: String): MemberEntity? = members.values.find { it.memberNo == memberNo }
         override suspend fun getAllMembersSync(): List<MemberEntity> = members.values.toList()
         override suspend fun getPaymentByRequestId(requestId: String): PaymentEntity? = payments.find { it.requestId == requestId }
         override fun observeMemberPayments(memberId: String): Flow<List<PaymentEntity>> = flowOf(payments.filter { it.memberId == memberId })
@@ -53,15 +30,12 @@ class CsvImportExportTest {
 
         override suspend fun insertMember(member: MemberEntity) { members[member.id] = member }
         override suspend fun insertMemberIgnore(member: MemberEntity): Long {
-            return if (members.values.any { it.batchYear == member.batchYear && it.memberNo == member.memberNo }) -1L else {
+            return if (members.values.any { it.memberNo == member.memberNo }) -1L else {
                 members[member.id] = member
                 1L
             }
         }
         override suspend fun insertPayment(payment: PaymentEntity) { payments.add(payment) }
-        override suspend fun deleteImportedPaymentsForYear(year: Int) {
-            payments.removeAll { it.periodYear == year && it.receiptNo.startsWith("IMPORT-") }
-        }
         override suspend fun insertPaymentIgnore(payment: PaymentEntity): Long {
             payments.add(payment)
             return 1L
@@ -88,23 +62,9 @@ class CsvImportExportTest {
         override suspend fun deleteExpense(id: String) {}
         override fun observeMonthlyTotal(year: Int, month: Int): Flow<Long> = flowOf(0L)
         override fun observeYearlyTotal(year: Int): Flow<Long> = flowOf(0L)
-        override fun observeActiveMemberCount(batchYear: Int): Flow<Int> = flowOf(members.values.count { it.batchYear == batchYear })
+        override fun observeActiveMemberCount(): Flow<Int> = flowOf(members.size)
         override fun observeLifetimeTotal(): Flow<Long> = flowOf(0L)
         override fun observePaidExpensesTotal(): Flow<Long> = flowOf(0L)
-        override suspend fun getMismatchedPaymentsCount(): Int {
-            return payments.count { p ->
-                val m = members[p.memberId]
-                m != null && m.batchYear != p.periodYear
-            }
-        }
-        override suspend fun deleteMismatchedPayments(): Int {
-            val count = getMismatchedPaymentsCount()
-            payments.removeAll { p ->
-                val m = members[p.memberId]
-                m != null && m.batchYear != p.periodYear
-            }
-            return count
-        }
     }
 
     @Test
@@ -114,7 +74,7 @@ class CsvImportExportTest {
         val result = CsvImportExport.import(ByteArrayInputStream(csv.toByteArray(Charsets.UTF_8)), dao)
         assertEquals(1, result.membersAdded)
         assertEquals(0, result.rowsSkipped)
-        assertEquals("Amina Salum", dao.getMemberByNumber(java.time.LocalDate.now().year, "M101")?.fullName)
+        assertEquals("Amina Salum", dao.getMemberByNumber("M101")?.fullName)
     }
 
     @Test
@@ -122,68 +82,14 @@ class CsvImportExportTest {
         val dao = FakeUWAPODao()
         val csv = "member_no,full_name,amount,year,month\r\nM101,Amina Salum,10000,2025,1\r\n"
         CsvImportExport.import(ByteArrayInputStream(csv.toByteArray(Charsets.UTF_8)), dao)
-        val member = dao.getMemberByNumber(2025, "M101")!!
+        val member = dao.getMemberByNumber("M101")!!
         assertEquals(1, dao.members.size)
         assertEquals(1, dao.payments.size)
 
         dao.deleteMember(member.id)
-        assertNull(dao.getMemberByNumber(2025, "M101"))
+        assertNull(dao.getMemberByNumber("M101"))
         assertEquals(0, dao.members.size)
         assertEquals(0, dao.payments.size)
-    }
-
-    @Test
-    fun testTotalMismatchWarning() = runBlocking {
-        val dao = FakeUWAPODao()
-        val csv = "member_no,full_name,amount_paid_tzs,period_year,period_month\r\n" +
-            "M101,Amina Salum,10000,2025,1\r\n" +
-            "TOTAL,,50000,2025,\r\n"
-        val result = CsvImportExport.import(ByteArrayInputStream(csv.toByteArray(Charsets.UTF_8)), dao)
-        assertEquals(10000L, result.calculatedTotal)
-        assertEquals(50000L, result.sheetDeclaredTotal)
-        org.junit.Assert.assertNotNull(result.totalMismatchWarning)
-    }
-
-    @Test
-    fun testBatchesAreIndependent() = runBlocking {
-        val dao = FakeUWAPODao()
-        val csv = "member_no,full_name,amount,year,month\r\nM101,Amina Salum,10000,2025,1\r\n"
-        val csv2 = "member_no,full_name,amount,year,month\r\nM101,Amina Salum,20000,2026,2\r\n"
-        // Same person imported into two different batches
-        CsvImportExport.import(ByteArrayInputStream(csv.toByteArray(Charsets.UTF_8)), dao, targetStartYear = 2025)
-        CsvImportExport.import(ByteArrayInputStream(csv2.toByteArray(Charsets.UTF_8)), dao, targetStartYear = 2026)
-
-        assertEquals(2, dao.members.size)
-        val m2025 = dao.getMemberByNumber(2025, "M101")!!
-        val m2026 = dao.getMemberByNumber(2026, "M101")!!
-        assert(m2025.id != m2026.id)
-        assertEquals(listOf(2025), dao.payments.filter { it.memberId == m2025.id }.map { it.periodYear })
-        assertEquals(listOf(2026), dao.payments.filter { it.memberId == m2026.id }.map { it.periodYear })
-        assertEquals(setOf(2025, 2026), dao.batches.keys)
-
-        // A batch import ignores rows that belong to another year
-        val mixed = "member_no,full_name,amount,year,month\r\nM102,Juma Ali,10000,2024,3\r\n"
-        CsvImportExport.import(ByteArrayInputStream(mixed.toByteArray(Charsets.UTF_8)), dao, targetStartYear = 2026)
-        val m102 = dao.getMemberByNumber(2026, "M102")!!
-        assertEquals(0, dao.payments.count { it.memberId == m102.id })
-        assertEquals(0, dao.payments.count { it.periodYear == 2024 })
-    }
-
-    @Test
-    fun testDeleteBatchLeavesOtherBatchesAlone() = runBlocking {
-        val dao = FakeUWAPODao()
-        val a = "member_no,full_name,amount,year,month\r\nM101,Amina Salum,10000,2025,1\r\n"
-        val b = "member_no,full_name,amount,year,month\r\nM101,Amina Salum,20000,2026,2\r\n"
-        CsvImportExport.import(ByteArrayInputStream(a.toByteArray(Charsets.UTF_8)), dao, targetStartYear = 2025)
-        CsvImportExport.import(ByteArrayInputStream(b.toByteArray(Charsets.UTF_8)), dao, targetStartYear = 2026)
-
-        dao.deleteBatch(2025)
-
-        assertNull(dao.getMemberByNumber(2025, "M101"))
-        assertEquals("Amina Salum", dao.getMemberByNumber(2026, "M101")?.fullName)
-        assertEquals(1, dao.payments.size)
-        assertEquals(2026, dao.payments.single().periodYear)
-        assertEquals(setOf(2026), dao.batches.keys)
     }
 
     @Test
@@ -193,7 +99,7 @@ class CsvImportExportTest {
         val result = CsvImportExport.import(ByteArrayInputStream(xlsxBytes), dao)
         assertEquals(1, result.membersAdded)
         assertEquals(0, result.rowsSkipped)
-        assertEquals("John Doe", dao.getMemberByNumber(java.time.LocalDate.now().year, "M202")?.fullName)
+        assertEquals("John Doe", dao.getMemberByNumber("M202")?.fullName)
     }
 
     @Test
@@ -202,10 +108,9 @@ class CsvImportExportTest {
         if (file.exists()) {
             val dao = FakeUWAPODao()
             val result = CsvImportExport.import(file.inputStream(), dao)
-            assertEquals(58, result.membersAdded)
-            assertEquals(58, dao.members.size)
-            assertEquals("MAGDALENA S.MARUA", dao.members.values.first { it.memberNo == "1" }.fullName)
-            assertEquals("DEMENTRIA M.OISO", dao.members.values.first { it.memberNo == "58" }.fullName)
+            assertEquals(57, result.membersAdded)
+            assertEquals(57, dao.members.size)
+            assertEquals("MAGDALENA S.MARUA", dao.getMemberByNumber("1")?.fullName)
         }
     }
 

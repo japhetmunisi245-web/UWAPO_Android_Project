@@ -52,6 +52,7 @@ class UWAPOApplication : Application() {
                 UWAPODatabase.MIGRATION_4_5
             )
             .addCallback(UWAPODatabase.SEED_CALLBACK)
+            .fallbackToDestructiveMigrationOnDowngrade()
 
         val dbPassphrase = securityManager.getDatabasePassphrase()
         if (!dbPassphrase.isNullOrBlank()) {
