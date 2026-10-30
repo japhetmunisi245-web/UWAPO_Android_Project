@@ -769,51 +769,74 @@ private fun ImportPreviewDialog(
         title = { Text("Import preview · $fileName → Batch $batchYear") },
         text = {
             Column(
-                Modifier.widthIn(max = 640.dp).heightIn(max = 460.dp).verticalScroll(rememberScrollState()),
+                Modifier.widthIn(max = 640.dp).height(420.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("New members to add: ${plan.newMembers.size}", fontWeight = FontWeight.Bold)
-                Text("Payments in the file: ${plan.payments.size} (${money(plan.computedTotal)})")
-                Text("Already in the database (will be skipped): ${plan.paymentsAlreadyInDb}")
-                Text("New payments to add: ${plan.newPayments}", fontWeight = FontWeight.Bold)
+                LazyColumnWithScrollbar(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("New members to add: ${plan.newMembers.size}", fontWeight = FontWeight.Bold)
+                            Text("Payments in the file: ${plan.payments.size} (${money(plan.computedTotal)})")
+                            Text("Already in the database (will be skipped): ${plan.paymentsAlreadyInDb}")
+                            Text("New payments to add: ${plan.newPayments}", fontWeight = FontWeight.Bold)
 
-                HorizontalDivider()
+                            Spacer(Modifier.height(4.dp))
+                            HorizontalDivider()
+                            Spacer(Modifier.height(4.dp))
 
-                val sheetTotal = plan.sheetTotal
-                when {
-                    sheetTotal == null -> Text(
-                        "No total found in the file to check against.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    plan.reconciles -> Text(
-                        "✓ Matches the file's own total (${money(sheetTotal)}).",
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Bold
-                    )
-                    else -> Text(
-                        "⚠ The file says ${money(sheetTotal)} but this import adds up to ${money(plan.computedTotal)} " +
-                            "(difference ${money(kotlin.math.abs(sheetTotal - plan.computedTotal))}).",
-                        color = MaterialTheme.colorScheme.error,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
+                            val sheetTotal = plan.sheetTotal
+                            when {
+                                sheetTotal == null -> Text(
+                                    "No total found in the file to check against.",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                plan.reconciles -> Text(
+                                    "✓ Matches the file's own total (${money(sheetTotal)}).",
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                else -> Text(
+                                    "⚠ The file says ${money(sheetTotal)} but this import adds up to ${money(plan.computedTotal)} " +
+                                        "(difference ${money(kotlin.math.abs(sheetTotal - plan.computedTotal))}).",
+                                    color = MaterialTheme.colorScheme.error,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
 
-                if (plan.notes.isNotEmpty()) {
-                    HorizontalDivider()
-                    Text("Name matches and renumbering (${plan.notes.size})", fontWeight = FontWeight.Bold)
-                    plan.notes.take(12).forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
-                    if (plan.notes.size > 12) Text("…and ${plan.notes.size - 12} more", style = MaterialTheme.typography.bodySmall)
-                }
+                    if (plan.notes.isNotEmpty()) {
+                        item {
+                            Spacer(Modifier.height(4.dp))
+                            HorizontalDivider()
+                            Spacer(Modifier.height(4.dp))
+                            Text("Name matches and renumbering (${plan.notes.size})", fontWeight = FontWeight.Bold)
+                        }
+                        items(plan.notes) { note ->
+                            Text("• $note", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
 
-                if (plan.warnings.isNotEmpty()) {
-                    HorizontalDivider()
-                    Text("Please review", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
-                    plan.warnings.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+                    if (plan.warnings.isNotEmpty()) {
+                        item {
+                            Spacer(Modifier.height(4.dp))
+                            HorizontalDivider()
+                            Spacer(Modifier.height(4.dp))
+                            Text("Please review", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+                        }
+                        items(plan.warnings) { warning ->
+                            Text("• $warning", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                        }
+                    }
                 }
 
                 if (needsReview) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(checked = acknowledged, onCheckedChange = { acknowledged = it })
+                        Spacer(Modifier.width(4.dp))
                         Text("I have reviewed the points above and want to import anyway.", style = MaterialTheme.typography.bodySmall)
                     }
                 }
