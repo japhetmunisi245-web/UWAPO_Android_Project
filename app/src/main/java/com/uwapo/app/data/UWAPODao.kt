@@ -60,19 +60,23 @@ interface UWAPODao {
     suspend fun updateMemberProfile(id: String, phone: String, status: String, notes: String)
     @Query("UPDATE members SET memberNo = :memberNo, fullName = :fullName, phone = :phone, status = :status, notes = :notes WHERE id = :id")
     suspend fun updateMemberDetails(id: String, memberNo: String, fullName: String, phone: String, status: String, notes: String)
-    @Query("DELETE FROM payments WHERE memberId IN (SELECT id FROM members WHERE batchYear = :batchYear)")
+    @Query("DELETE FROM payments WHERE memberId IN (SELECT id FROM members WHERE batchYear = :batchYear) OR periodYear = :batchYear")
     suspend fun deletePaymentsForBatch(batchYear: Int)
     @Query("DELETE FROM members WHERE batchYear = :batchYear")
     suspend fun deleteMembersForBatch(batchYear: Int)
     @Query("DELETE FROM batches WHERE year = :batchYear")
     suspend fun deleteBatchRow(batchYear: Int)
-    /** Deletes a batch together with its own members and their payments. Other batches are untouched. */
+    /** Deletes a batch together with its own members and all payments dated in that year or belonging to batch members. */
     @androidx.room.Transaction
     suspend fun deleteBatch(batchYear: Int) {
         deletePaymentsForBatch(batchYear)
         deleteMembersForBatch(batchYear)
         deleteBatchRow(batchYear)
     }
+    @Query("SELECT COUNT(*) FROM payments p JOIN members m ON p.memberId = m.id WHERE m.batchYear != p.periodYear")
+    suspend fun getMismatchedPaymentsCount(): Int
+    @Query("DELETE FROM payments WHERE id IN (SELECT p.id FROM payments p JOIN members m ON p.memberId = m.id WHERE m.batchYear != p.periodYear)")
+    suspend fun deleteMismatchedPayments(): Int
     @Query("DELETE FROM payments WHERE memberId = :memberId")
     suspend fun deletePaymentsForMember(memberId: String)
     @Query("DELETE FROM members WHERE id = :id")

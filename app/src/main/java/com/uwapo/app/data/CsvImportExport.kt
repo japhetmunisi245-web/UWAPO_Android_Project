@@ -12,7 +12,14 @@ import java.util.zip.ZipInputStream
 import javax.xml.parsers.DocumentBuilderFactory
 
 object CsvImportExport {
-    data class ImportResult(val membersAdded: Int, val paymentsAdded: Int, val rowsSkipped: Int)
+    data class ImportResult(
+        val membersAdded: Int,
+        val paymentsAdded: Int,
+        val rowsSkipped: Int,
+        val sheetDeclaredTotal: Long? = null,
+        val calculatedTotal: Long = 0L,
+        val totalMismatchWarning: String? = null
+    )
 
     private val MONTH_MAP = mapOf(
         "january" to 1, "jan" to 1, "januari" to 1,
@@ -170,6 +177,8 @@ object CsvImportExport {
         val existingMembers = dao.getMembersForBatchSync(year).toMutableList()
         var membersAdded = 0
         var paymentsAdded = 0
+        var calculatedTotal = 0L
+        var sheetDeclaredTotal: Long? = null
         val skipped = 0
 
         for ((sheetIdx, sheet) in sheets.withIndex()) {
@@ -216,7 +225,10 @@ object CsvImportExport {
                                 paidDate.atStartOfDay(ZoneId.of("Africa/Dar_es_Salaam")).toInstant().toEpochMilli(),
                                 "cash", receipt, paymentId, "pending"
                             )
-                            if (dao.insertPaymentIgnore(payment) != -1L) paymentsAdded++
+                            if (dao.insertPaymentIgnore(payment) != -1L) {
+                                paymentsAdded++
+                                calculatedTotal += amount
+                            }
                         }
                     }
                 }
@@ -229,9 +241,21 @@ object CsvImportExport {
                 val rawCell = row.getOrNull(0)?.trim() ?: ""
                 val rawUpper = rawCell.uppercase(Locale.ROOT)
 
-                if (rawUpper in listOf("TOTAL", "JUMLA", "JUNE", "JINA", "ADA", "JUMLA ADA", "JULY", "AUG", "SEPT", "OCT", "NOV", "DEC")) {
-                    if (rawUpper in listOf("TOTAL", "JUMLA", "JUMLA ADA")) {
+                if (rawUpper in listOf("TOTAL", "JUMLA", "JUNE", "JINA", "ADA", "JUMLA ADA", "JULY", "AUG", "SEPT", "OCT", "NOV", "DEC") || rawUpper.startsWith("TOTAL") || rawUpper.startsWith("JUMLA")) {
+                    if (rawUpper in listOf("TOTAL", "JUMLA", "JUMLA ADA") || rawUpper.startsWith("TOTAL") || rawUpper.startsWith("JUMLA")) {
                         commitBlock()
+                        val monthColSums = monthCols.mapNotNull { (cIdx, _) ->
+                            row.getOrNull(cIdx)?.replace(",", "")?.trim()?.toDoubleOrNull()?.toLong()
+                        }.filter { it > 0 }
+                        if (monthColSums.isNotEmpty()) {
+                            val sum = monthColSums.sum()
+                            if (sum > 0) sheetDeclaredTotal = (sheetDeclaredTotal ?: 0L) + sum
+                        } else {
+                            val allNums = row.mapNotNull { it.replace(",", "").trim().toDoubleOrNull()?.toLong() }.filter { it > 0 }
+                            if (allNums.isNotEmpty()) {
+                                sheetDeclaredTotal = (sheetDeclaredTotal ?: 0L) + allNums.maxOrNull()!!
+                            }
+                        }
                     }
                     continue
                 }
@@ -261,7 +285,15 @@ object CsvImportExport {
 
             commitBlock()
         }
-        return ImportResult(membersAdded, paymentsAdded, skipped)
+
+        val warning = if (sheetDeclaredTotal != null && sheetDeclaredTotal > 0 && calculatedTotal != sheetDeclaredTotal) {
+            val fmtDeclared = java.text.NumberFormat.getNumberInstance(Locale.US).format(sheetDeclaredTotal)
+            val fmtCalc = java.text.NumberFormat.getNumberInstance(Locale.US).format(calculatedTotal)
+            val diff = java.text.NumberFormat.getNumberInstance(Locale.US).format(kotlin.math.abs(sheetDeclaredTotal - calculatedTotal))
+            "Warning: Sheet TOTAL row shows TZS $fmtDeclared, but imported payments sum to TZS $fmtCalc (Difference: TZS $diff). Please verify sheet rows."
+        } else null
+
+        return ImportResult(membersAdded, paymentsAdded, skipped, sheetDeclaredTotal, calculatedTotal, warning)
     }
 
     private suspend fun importStandardRows(rows: List<List<String>>, dao: UWAPODao, targetStartYear: Int? = null): ImportResult {
@@ -286,6 +318,8 @@ object CsvImportExport {
 
         var membersAdded = 0
         var paymentsAdded = 0
+        var calculatedTotal = 0L
+        var sheetDeclaredTotal: Long? = null
         var skipped = 0
 
         // One member list per batch year, so the same person in two batches stays two separate members.
@@ -297,6 +331,15 @@ object CsvImportExport {
             val (numFromCell, nameFromCell) = parseMemberCell(if (rawName.isNotBlank()) rawName else rawNo)
             val memberNo = cleanStr(if (rawNo.isNotBlank()) rawNo else numFromCell)
             val fullName = if (rawName.isNotBlank() && iName != iNo) rawName else nameFromCell
+
+            if (rawName.contains("TOTAL", ignoreCase = true) || rawName.contains("JUMLA", ignoreCase = true) ||
+                rawNo.contains("TOTAL", ignoreCase = true) || rawNo.contains("JUMLA", ignoreCase = true)) {
+                val declaredAmt = value(iAmount).replace(",", "").replace("TZS", "", ignoreCase = true).trim().toDoubleOrNull()?.toLong()
+                if (declaredAmt != null && declaredAmt > 0) {
+                    sheetDeclaredTotal = (sheetDeclaredTotal ?: 0L) + declaredAmt
+                }
+                return@forEach
+            }
 
             if (memberNo.isBlank() && fullName.isBlank()) { skipped++; return@forEach }
             val rowPaymentYear = cleanStr(value(iYear)).toIntOrNull()
@@ -332,10 +375,21 @@ object CsvImportExport {
                     paidDate.atStartOfDay(ZoneId.of("Africa/Dar_es_Salaam")).toInstant().toEpochMilli(),
                     if (method in listOf("cash", "bank", "mobile_money", "other")) method else "other",
                     receipt, paymentId, "pending")
-                if (dao.insertPaymentIgnore(payment) != -1L) paymentsAdded++
+                if (dao.insertPaymentIgnore(payment) != -1L) {
+                    paymentsAdded++
+                    calculatedTotal += amount
+                }
             }
         }
-        return ImportResult(membersAdded, paymentsAdded, skipped)
+
+        val warning = if (sheetDeclaredTotal != null && sheetDeclaredTotal > 0 && calculatedTotal != sheetDeclaredTotal) {
+            val fmtDeclared = java.text.NumberFormat.getNumberInstance(Locale.US).format(sheetDeclaredTotal)
+            val fmtCalc = java.text.NumberFormat.getNumberInstance(Locale.US).format(calculatedTotal)
+            val diff = java.text.NumberFormat.getNumberInstance(Locale.US).format(kotlin.math.abs(sheetDeclaredTotal - calculatedTotal))
+            "Warning: Sheet TOTAL row shows TZS $fmtDeclared, but imported payments sum to TZS $fmtCalc (Difference: TZS $diff). Please verify sheet rows."
+        } else null
+
+        return ImportResult(membersAdded, paymentsAdded, skipped, sheetDeclaredTotal, calculatedTotal, warning)
     }
 
     private fun detectYear(sheets: List<List<List<String>>>): Int {

@@ -224,4 +224,38 @@ object DatabaseBackupManager {
         val keyBytes = factory.generateSecret(spec).encoded
         return SecretKeySpec(keyBytes, "AES")
     }
+
+    suspend fun getBackupCacheSize(context: Context): Long = withContext(Dispatchers.IO) {
+        var totalSize = 0L
+        val backupDir = File(context.cacheDir, "backups")
+        if (backupDir.exists()) {
+            backupDir.listFiles()?.forEach { file ->
+                if (file.isFile) totalSize += file.length()
+            }
+        }
+        context.cacheDir.listFiles()?.forEach { file ->
+            if (file.isFile && file.name.startsWith("temp_restore_")) {
+                totalSize += file.length()
+            }
+        }
+        totalSize
+    }
+
+    suspend fun clearOldBackups(context: Context): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val backupDir = File(context.cacheDir, "backups")
+            if (backupDir.exists()) {
+                backupDir.listFiles()?.forEach { it.delete() }
+            }
+            context.cacheDir.listFiles()?.forEach { file ->
+                if (file.isFile && file.name.startsWith("temp_restore_")) {
+                    file.delete()
+                }
+            }
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
 }

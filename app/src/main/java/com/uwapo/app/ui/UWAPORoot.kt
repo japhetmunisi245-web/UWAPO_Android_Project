@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.HourglassEmpty
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.People
@@ -138,6 +139,10 @@ fun UWAPORoot(dao: UWAPODao) {
     var selectedPaymentForReceipt by remember { mutableStateOf<PaymentEntity?>(null) }
     var selectedExpenseForDetail by remember { mutableStateOf<ExpenseEntity?>(null) }
 
+    var importWarningText by remember { mutableStateOf<String?>(null) }
+    var showMaintenanceDialog by remember { mutableStateOf(false) }
+    var showTopMenu by remember { mutableStateOf(false) }
+
     val scope = rememberCoroutineScope()
 
     val currentPaidMemberIds = remember(payments, currentYear, currentMonth) {
@@ -157,6 +162,9 @@ fun UWAPORoot(dao: UWAPODao) {
                 }
                 val msg = context.getString(R.string.toast_import_complete, result.membersAdded, result.paymentsAdded, result.rowsSkipped)
                 Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                if (result.totalMismatchWarning != null) {
+                    importWarningText = result.totalMismatchWarning
+                }
             } catch (e: Exception) {
                 val msg = context.getString(R.string.toast_import_failed, e.message ?: "")
                 Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
@@ -181,6 +189,9 @@ fun UWAPORoot(dao: UWAPODao) {
                     result.rowsSkipped
                 )
                 Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                if (result.totalMismatchWarning != null) {
+                    importWarningText = result.totalMismatchWarning
+                }
             } catch (e: Exception) {
                 val msg = context.getString(R.string.toast_import_failed, e.message ?: "")
                 Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
@@ -227,13 +238,32 @@ fun UWAPORoot(dao: UWAPODao) {
                     OutlinedButton(
                         onClick = { currentLanguage = if (currentLanguage == "sw") "en" else "sw" },
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                        modifier = Modifier.padding(end = 8.dp)
+                        modifier = Modifier.padding(end = 4.dp)
                     ) {
                         Text(
                             text = if (currentLanguage == "sw") "EN" else "SW",
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onPrimary,
                             style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+                    IconButton(onClick = { showTopMenu = true }) {
+                        Icon(
+                            Icons.Default.MoreVert,
+                            contentDescription = "More Options",
+                            tint = MaterialTheme.colorScheme.onPrimary
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showTopMenu,
+                        onDismissRequest = { showTopMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Database Maintenance & Backups") },
+                            onClick = {
+                                showTopMenu = false
+                                showMaintenanceDialog = true
+                            }
                         )
                     }
                 },
@@ -459,6 +489,29 @@ fun UWAPORoot(dao: UWAPODao) {
             dismissButton = {
                 OutlinedButton(onClick = { expenseToDelete = null }) {
                     Text(stringResource(R.string.btn_cancel))
+                }
+            }
+        )
+    }
+
+    if (showMaintenanceDialog) {
+        DataMaintenanceDialog(dao = dao, onDismiss = { showMaintenanceDialog = false })
+    }
+
+    importWarningText?.let { warningMsg ->
+        AlertDialog(
+            onDismissRequest = { importWarningText = null },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Import Total Mismatch")
+                }
+            },
+            text = { Text(warningMsg) },
+            confirmButton = {
+                Button(onClick = { importWarningText = null }) {
+                    Text("OK, I Understand")
                 }
             }
         )
@@ -869,14 +922,15 @@ private fun MembersScreen(
 
     batchToDelete?.let { batch ->
         val batchMemberIds = members.filter { it.batchYear == batch.year }.map { it.id }.toSet()
-        val batchPaymentCount = payments.count { it.memberId in batchMemberIds }
+        val batchPaymentCount = payments.count { it.memberId in batchMemberIds || it.periodYear == batch.year }
         AlertDialog(
             onDismissRequest = { batchToDelete = null },
-            title = { Text("Delete batch ${batch.displayLabel}?") },
+            title = { Text("Delete batch ${batch.displayLabel} completely?") },
             text = {
                 Text(
-                    "This permanently deletes batch ${batch.displayLabel} with its ${batchMemberIds.size} member(s) " +
-                        "and $batchPaymentCount payment record(s). Other batches are not affected. This cannot be undone."
+                    "This will completely delete batch ${batch.displayLabel}, removing all ${batchMemberIds.size} member(s), " +
+                        "all $batchPaymentCount payment record(s) dated in ${batch.year} (including reversed payments), and all batch settings. " +
+                        "Other batches are not affected. This action cannot be undone."
                 )
             },
             confirmButton = {
@@ -894,7 +948,7 @@ private fun MembersScreen(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) {
-                    Text("Delete batch")
+                    Text("Delete batch completely")
                 }
             },
             dismissButton = {
@@ -1054,7 +1108,10 @@ private fun Step2SelectPeriodView(
         LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             items(ContributionPeriod.entries.toTypedArray(), key = { it.name }) { period ->
                 val targetYear = period.getYear(batchYear)
-                val batchMemberIds = members.map { it.id }.toSet()
+                val batchMemberIds = members
+            .filter { it.batchYear == batchYear.year }
+            .map { it.id }
+            .toSet()
                 val termPayments = payments.filter {
                     it.syncStatus != "reversed" &&
                     it.memberId in batchMemberIds &&
@@ -1150,7 +1207,10 @@ private fun Step3PeriodDetailsView(
     val requiredPerTerm = 60000L
 
     val termPayments = remember(payments, members, targetYear, period) {
-        val batchMemberIds = members.map { it.id }.toSet()
+        val batchMemberIds = members
+            .filter { it.batchYear == batchYear.year }
+            .map { it.id }
+            .toSet()
         payments.filter {
             it.syncStatus != "reversed" &&
             it.memberId in batchMemberIds &&
@@ -2380,4 +2440,103 @@ private fun RecordPaymentDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.btn_cancel)) } }
     )
+}
+
+@Composable
+private fun DataMaintenanceDialog(
+    dao: com.uwapo.app.data.UWAPODao,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var cacheSize by remember { mutableStateOf<Long?>(null) }
+    var mismatchedCount by remember { mutableStateOf<Int?>(null) }
+    var showMismatchConfirm by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        cacheSize = com.uwapo.app.data.DatabaseBackupManager.getBackupCacheSize(context)
+        mismatchedCount = dao.getMismatchedPaymentsCount()
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Database Maintenance & Backups") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Column {
+                    Text("Backup Cache & Temporary Files", fontWeight = FontWeight.Bold)
+                    val sizeFormatted = cacheSize?.let { android.text.format.Formatter.formatShortFileSize(context, it) } ?: "Calculating..."
+                    Text("Current size: $sizeFormatted", style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.height(4.dp))
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                com.uwapo.app.data.DatabaseBackupManager.clearOldBackups(context)
+                                cacheSize = com.uwapo.app.data.DatabaseBackupManager.getBackupCacheSize(context)
+                                Toast.makeText(context, "Backup cache cleared", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    ) {
+                        Text("Clear Old Backups")
+                    }
+                }
+
+                HorizontalDivider()
+
+                Column {
+                    Text("Payment & Batch Mismatch Cleanup", fontWeight = FontWeight.Bold)
+                    Text("Finds payments where member's batch does not match the payment year.", style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.height(4.dp))
+                    val countText = mismatchedCount?.let { "$it mismatched payment(s) found" } ?: "Checking..."
+                    Text(countText, style = MaterialTheme.typography.bodySmall, color = if ((mismatchedCount ?: 0) > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
+                    Spacer(Modifier.height(4.dp))
+                    Button(
+                        onClick = {
+                            if ((mismatchedCount ?: 0) > 0) {
+                                showMismatchConfirm = true
+                            } else {
+                                Toast.makeText(context, "No mismatched payments found.", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = if ((mismatchedCount ?: 0) > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
+                    ) {
+                        Text("Clean Mismatched Payments")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        }
+    )
+
+    if (showMismatchConfirm) {
+        AlertDialog(
+            onDismissRequest = { showMismatchConfirm = false },
+            title = { Text("Delete Mismatched Payments?") },
+            text = { Text("Are you sure you want to delete ${mismatchedCount ?: 0} payment(s) whose member batch does not match the payment year? This cannot be undone.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showMismatchConfirm = false
+                        scope.launch {
+                            val deleted = dao.deleteMismatchedPayments()
+                            mismatchedCount = dao.getMismatchedPaymentsCount()
+                            Toast.makeText(context, "$deleted mismatched payment(s) removed", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete Mismatched")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showMismatchConfirm = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }

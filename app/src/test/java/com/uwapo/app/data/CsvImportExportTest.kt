@@ -91,6 +91,20 @@ class CsvImportExportTest {
         override fun observeActiveMemberCount(batchYear: Int): Flow<Int> = flowOf(members.values.count { it.batchYear == batchYear })
         override fun observeLifetimeTotal(): Flow<Long> = flowOf(0L)
         override fun observePaidExpensesTotal(): Flow<Long> = flowOf(0L)
+        override suspend fun getMismatchedPaymentsCount(): Int {
+            return payments.count { p ->
+                val m = members[p.memberId]
+                m != null && m.batchYear != p.periodYear
+            }
+        }
+        override suspend fun deleteMismatchedPayments(): Int {
+            val count = getMismatchedPaymentsCount()
+            payments.removeAll { p ->
+                val m = members[p.memberId]
+                m != null && m.batchYear != p.periodYear
+            }
+            return count
+        }
     }
 
     @Test
@@ -116,6 +130,18 @@ class CsvImportExportTest {
         assertNull(dao.getMemberByNumber(2025, "M101"))
         assertEquals(0, dao.members.size)
         assertEquals(0, dao.payments.size)
+    }
+
+    @Test
+    fun testTotalMismatchWarning() = runBlocking {
+        val dao = FakeUWAPODao()
+        val csv = "member_no,full_name,amount_paid_tzs,period_year,period_month\r\n" +
+            "M101,Amina Salum,10000,2025,1\r\n" +
+            "TOTAL,,50000,2025,\r\n"
+        val result = CsvImportExport.import(ByteArrayInputStream(csv.toByteArray(Charsets.UTF_8)), dao)
+        assertEquals(10000L, result.calculatedTotal)
+        assertEquals(50000L, result.sheetDeclaredTotal)
+        org.junit.Assert.assertNotNull(result.totalMismatchWarning)
     }
 
     @Test
@@ -176,9 +202,10 @@ class CsvImportExportTest {
         if (file.exists()) {
             val dao = FakeUWAPODao()
             val result = CsvImportExport.import(file.inputStream(), dao)
-            assertEquals(57, result.membersAdded)
-            assertEquals(57, dao.members.size)
+            assertEquals(58, result.membersAdded)
+            assertEquals(58, dao.members.size)
             assertEquals("MAGDALENA S.MARUA", dao.members.values.first { it.memberNo == "1" }.fullName)
+            assertEquals("DEMENTRIA M.OISO", dao.members.values.first { it.memberNo == "58" }.fullName)
         }
     }
 
