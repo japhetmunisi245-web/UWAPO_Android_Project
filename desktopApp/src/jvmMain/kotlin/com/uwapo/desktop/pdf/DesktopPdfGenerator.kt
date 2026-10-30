@@ -179,8 +179,8 @@ object DesktopPdfGenerator {
             cs.endText()
 
             // Name
-            val nameStr = "${row.fullName} (${row.memberNo})"
-            val truncatedName = if (nameStr.length > 32) nameStr.take(30) + ".." else nameStr
+            val nameStr = row.fullName
+            val truncatedName = if (nameStr.length > 40) nameStr.take(38) + ".." else nameStr
             cs.beginText()
             cs.setFont(fontRegular, 9f)
             cs.newLineAtOffset(70f, y)

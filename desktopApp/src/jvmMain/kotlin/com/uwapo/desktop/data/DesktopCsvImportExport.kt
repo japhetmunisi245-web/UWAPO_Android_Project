@@ -205,7 +205,11 @@ object DesktopCsvImportExport {
             if (matchedByName != null && normalizeMemberName(matched.fullName) != normName) {
                 notes.add("\"${fullName.trim()}\" treated as the same person as \"${matched.fullName.trim()}\" (No. ${matched.memberNo})")
             }
-            return Pair(matched, false)
+            val updated = matched.copy(batchYear = year)
+            if (matched.batchYear != year) {
+                newMembers.add(updated)
+            }
+            return Pair(updated, false)
         }
 
         var memberNo = num.ifBlank { fullName.replace(" ", "_").take(15) }
@@ -223,7 +227,8 @@ object DesktopCsvImportExport {
             phone = phone,
             joinedAt = joinDate.atStartOfDay(ZoneId.of("Africa/Dar_es_Salaam")).toInstant().toEpochMilli(),
             status = status,
-            syncStatus = "pending"
+            syncStatus = "pending",
+            batchYear = year
         )
 
         existingMembers.add(newMember)
@@ -251,7 +256,7 @@ object DesktopCsvImportExport {
     }
 
     private fun planMatrixLedger(sheets: List<List<List<String>>>, db: DesktopDatabase, targetStartYear: Int? = null): ImportPlan {
-        val year = targetStartYear ?: detectYear(sheets)
+        val year = targetStartYear ?: detectYear(sheets, targetStartYear)
         db.refreshMembers()
         val existingMembers = db.members.value.toMutableList()
         val newMembers = mutableListOf<MemberEntity>()
@@ -485,10 +490,10 @@ object DesktopCsvImportExport {
         )
     }
 
-    private fun detectYear(sheets: List<List<List<String>>>): Int {
+    private fun detectYear(sheets: List<List<List<String>>>, fallbackYear: Int? = null): Int {
         val yearRegex = Regex("""\b(20\d\d)\b""")
         for (sheet in sheets) {
-            for (row in sheet.take(5)) {
+            for (row in sheet.take(10)) {
                 for (cell in row) {
                     val m = yearRegex.find(cell)
                     if (m != null) {
@@ -498,7 +503,7 @@ object DesktopCsvImportExport {
                 }
             }
         }
-        return LocalDate.now().year
+        return fallbackYear ?: LocalDate.now().year
     }
 
     private fun parseMemberCell(raw: String): Pair<String, String> {
@@ -561,15 +566,35 @@ object DesktopCsvImportExport {
 
     private fun parseInputSheets(input: InputStream): List<List<List<String>>> {
         val bytes = input.readBytes()
+        if (bytes.isEmpty()) throw IllegalArgumentException("The selected file is empty.")
+
         val isZip = bytes.size >= 4 && bytes[0] == 0x50.toByte() && bytes[1] == 0x4B.toByte() && bytes[2] == 0x03.toByte() && bytes[3] == 0x04.toByte()
+        val isOle2Xls = bytes.size >= 4 && bytes[0] == 0xD0.toByte() && bytes[1] == 0xCF.toByte() && bytes[2] == 0x11.toByte() && bytes[3] == 0xE0.toByte()
+
+        if (isOle2Xls) {
+            throw IllegalArgumentException("The file is in legacy binary Excel (.xls) format. Please save or export the file as .xlsx or .csv and try importing again.")
+        }
+
         return if (isZip) {
             parseXlsxSheets(bytes)
         } else {
-            listOf(parseCsv(ByteArrayInputStream(bytes).bufferedReader(Charsets.UTF_8).readText()))
+            val text = ByteArrayInputStream(bytes).bufferedReader(Charsets.UTF_8).readText()
+            listOf(parseCsv(text))
         }
     }
 
     private fun parseCsv(text: String): List<List<String>> {
+        val sampleLines = text.lines().take(10).filter { it.isNotBlank() }
+        val commaCount = sampleLines.sumOf { line -> line.count { it == ',' } }
+        val semiCount = sampleLines.sumOf { line -> line.count { it == ';' } }
+        val tabCount = sampleLines.sumOf { line -> line.count { it == '\t' } }
+
+        val delimiter = when {
+            semiCount > commaCount && semiCount > tabCount -> ';'
+            tabCount > commaCount && tabCount > semiCount -> '\t'
+            else -> ','
+        }
+
         val result = mutableListOf<List<String>>()
         var row = mutableListOf<String>()
         val cell = StringBuilder()
@@ -580,7 +605,7 @@ object DesktopCsvImportExport {
             when {
                 c == '"' && quoted && i + 1 < text.length && text[i + 1] == '"' -> { cell.append('"'); i++ }
                 c == '"' -> quoted = !quoted
-                c == ',' && !quoted -> { row.add(cell.toString()); cell.setLength(0) }
+                c == delimiter && !quoted -> { row.add(cell.toString()); cell.setLength(0) }
                 (c == '\n' || c == '\r') && !quoted -> {
                     if (c == '\r' && i + 1 < text.length && text[i + 1] == '\n') i++
                     row.add(cell.toString()); cell.setLength(0)

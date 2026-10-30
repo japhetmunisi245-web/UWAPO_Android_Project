@@ -36,6 +36,15 @@ compose.desktop {
             description = "UWAPO Financial Management Desktop Application"
             copyright = "© 2025 UWAPO. All rights reserved."
             vendor = "UWAPO"
+
+            includeAllModules = true
+
+            windows {
+                perUserInstall = true
+                dirChooser = true
+                menu = true
+                shortcut = true
+            }
         }
     }
 }

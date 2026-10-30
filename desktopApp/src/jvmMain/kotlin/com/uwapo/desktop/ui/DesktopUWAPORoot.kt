@@ -1,12 +1,17 @@
 package com.uwapo.desktop.ui
 
+import androidx.compose.foundation.LocalScrollbarStyle
+import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -424,7 +429,7 @@ private fun DesktopDashboardView(
                 if (defaulters.isEmpty()) {
                     Text(if (language == "sw") "Wanachama wote hai wamelipa mwezi huu!" else "All active members have paid for this month!", color = MaterialTheme.colorScheme.primary)
                 } else {
-                    LazyColumn(Modifier.heightIn(max = 300.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    LazyColumnWithScrollbar(Modifier.fillMaxWidth().height((defaulters.size.coerceAtMost(8) * 38 + 4).dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         items(defaulters, key = { it.id }) { m ->
                             Row(Modifier.fillMaxWidth().padding(4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text("${m.fullName} (${m.memberNo})", fontWeight = FontWeight.SemiBold)
@@ -579,8 +584,8 @@ private fun DesktopMembersView(
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) }
                 )
 
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val batchMembers = members.filter { (it.batchYear == selectedBatchYear || selectedBatchYear == 2025) && it.status == "active" && mMatchesSearch(it, search) }
+                LazyColumnWithScrollbar(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val batchMembers = members.filter { (it.batchYear == selectedBatchYear || members.none { m -> m.batchYear == selectedBatchYear }) && it.status == "active" && mMatchesSearch(it, search) }
                     items(batchMembers, key = { it.id }) { m ->
                         val mPayments = termPayments.filter { it.memberId == m.id }
                         val paid = mPayments.sumOf { it.amountTzs }
@@ -627,7 +632,7 @@ private fun DesktopMembersView(
                 (statusFilter == "all" || m.status.equals(statusFilter, true)) && mMatchesSearch(m, search)
             }
 
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            LazyColumnWithScrollbar(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(filtered, key = { it.id }) { m ->
                     Card(Modifier.fillMaxWidth().clickable { onSelectMember(m) }) {
                         Row(Modifier.padding(12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -833,7 +838,7 @@ private fun DesktopFinanceView(expenses: List<ExpenseEntity>, db: DesktopDatabas
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(if (language == "sw") "Matumizi ya Klabu" else "Club Expenses", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
 
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        LazyColumnWithScrollbar(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(expenses, key = { it.id }) { e ->
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -984,54 +989,50 @@ private fun DesktopReportsView(
             }
         }
 
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LazyColumnWithScrollbar(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             item {
                 Card(shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-                    Column(Modifier.padding(14.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text("Member Contributions Grid ($termTitle)", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                            Text("${sortedMembers.size} Members", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Row(Modifier.padding(14.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text("Member Contributions Grid ($termTitle)", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                        Text("${sortedMembers.size} Members", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
+
+            items(termMemberRows) { row ->
+                Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(10.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(row.fullName, fontWeight = FontWeight.Bold)
+                            Text(money(row.totalAmount), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                         }
-
-                        HorizontalDivider()
-
-                        termMemberRows.forEach { row ->
-                            Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
-                                Column(Modifier.padding(10.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                        Text("${row.fullName} (${row.memberNo})", fontWeight = FontWeight.Bold)
-                                        Text(money(row.totalAmount), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                                    }
-                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                        termMonthLabels.forEachIndexed { mIdx, label ->
-                                            val amt = row.monthlyAmounts.getOrElse(mIdx) { 0L }
-                                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                                Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                Text(if (amt > 0) money(amt).replace("TZS ", "") else "-", style = MaterialTheme.typography.labelSmall, fontWeight = if (amt > 0) FontWeight.Bold else FontWeight.Normal)
-                                            }
-                                        }
-                                    }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            termMonthLabels.forEachIndexed { mIdx, label ->
+                                val amt = row.monthlyAmounts.getOrElse(mIdx) { 0L }
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(if (amt > 0) money(amt).replace("TZS ", "") else "-", style = MaterialTheme.typography.labelSmall, fontWeight = if (amt > 0) FontWeight.Bold else FontWeight.Normal)
                                 }
                             }
                         }
+                    }
+                }
+            }
 
-                        HorizontalDivider()
-
-                        // Grand Total Summary Box
-                        Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.fillMaxWidth()) {
-                            Column(Modifier.padding(12.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text("GRAND TOTAL", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                                    Text(money(grandTotalTerm), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-                                }
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    termMonthLabels.forEachIndexed { mIdx, label ->
-                                        val mSum = grandTotalMonthly.getOrElse(mIdx) { 0L }
-                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                                            Text(if (mSum > 0) money(mSum).replace("TZS ", "") else "0", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                                        }
-                                    }
+            item {
+                // Grand Total Summary Box
+                Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("GRAND TOTAL", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                            Text(money(grandTotalTerm), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            termMonthLabels.forEachIndexed { mIdx, label ->
+                                val mSum = grandTotalMonthly.getOrElse(mIdx) { 0L }
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                    Text(if (mSum > 0) money(mSum).replace("TZS ", "") else "0", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                                 }
                             }
                         }
@@ -1203,7 +1204,7 @@ private fun DesktopMemberProfileDialog(
                 if (payments.isEmpty()) {
                     Text(if (language == "sw") "Hakuna malipo bado." else "No payments recorded yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
-                    LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    LazyColumnWithScrollbar(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         items(payments, key = { it.id }) { p ->
                             val isReversed = p.syncStatus.startsWith("reversed")
                             val paidDateStr = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(p.paidAt))
@@ -1379,4 +1380,34 @@ private fun DesktopMaintenanceDialog(
             Button(onClick = onDismiss) { Text(if (language == "sw") "Funga" else "Close") }
         }
     )
+}
+
+/**
+ * LazyColumn with a draggable desktop scrollbar on the right edge.
+ * Give it a bounded height (e.g. Modifier.weight(1f) inside a Column).
+ */
+@Composable
+private fun LazyColumnWithScrollbar(
+    modifier: Modifier = Modifier,
+    verticalArrangement: Arrangement.Vertical = Arrangement.Top,
+    content: LazyListScope.() -> Unit
+) {
+    val listState = rememberLazyListState()
+    Box(modifier) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize().padding(end = 16.dp),
+            verticalArrangement = verticalArrangement,
+            content = content
+        )
+        VerticalScrollbar(
+            adapter = rememberScrollbarAdapter(listState),
+            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+            style = LocalScrollbarStyle.current.copy(
+                thickness = 12.dp,
+                unhoverColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
+                hoverColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+            )
+        )
+    }
 }

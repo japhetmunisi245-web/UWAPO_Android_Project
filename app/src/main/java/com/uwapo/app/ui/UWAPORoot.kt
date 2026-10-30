@@ -163,7 +163,7 @@ fun UWAPORoot(
         if (uri != null) scope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
-                    context.contentResolver.openInputStream(uri)?.use { CsvImportExport.import(it, dao) }
+                    context.contentResolver.openInputStream(uri)?.use { CsvImportExport.import(it, dao, targetStartYear = activeBatchContext?.year ?: currentYear) }
                         ?: throw IllegalStateException("Could not open the selected file.")
                 }
                 val msg = context.getString(R.string.toast_import_complete, result.membersAdded, result.paymentsAdded, result.rowsSkipped)
@@ -2041,7 +2041,7 @@ private fun ReportsScreen(
                                                 horizontalArrangement = Arrangement.SpaceBetween,
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Text("${row.fullName} (${row.memberNo})", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                                                Text(row.fullName, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                                                 Text(money(row.totalAmount), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                                             }
 

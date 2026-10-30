@@ -210,7 +210,7 @@ class DesktopDatabase {
             conn.autoCommit = false
             try {
                 conn.prepareStatement(
-                    "INSERT OR IGNORE INTO members (id, memberNo, fullName, phone, joinedAt, status, syncStatus, notes, batchYear) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                    "INSERT INTO members (id, memberNo, fullName, phone, joinedAt, status, syncStatus, notes, batchYear) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET batchYear = excluded.batchYear"
                 ).use { ps ->
                     for (m in newMembers) {
                         ps.setString(1, m.id); ps.setString(2, m.memberNo); ps.setString(3, m.fullName)
