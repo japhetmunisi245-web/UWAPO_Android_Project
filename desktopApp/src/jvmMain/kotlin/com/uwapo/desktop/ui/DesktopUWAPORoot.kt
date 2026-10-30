@@ -3,6 +3,7 @@ package com.uwapo.desktop.ui
 import androidx.compose.foundation.LocalScrollbarStyle
 import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -432,7 +433,7 @@ private fun DesktopDashboardView(
                     LazyColumnWithScrollbar(Modifier.fillMaxWidth().height((defaulters.size.coerceAtMost(8) * 38 + 4).dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         items(defaulters, key = { it.id }) { m ->
                             Row(Modifier.fillMaxWidth().padding(4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("${m.fullName} (${m.memberNo})", fontWeight = FontWeight.SemiBold)
+                                Text(m.fullName, fontWeight = FontWeight.SemiBold)
                                 Text(m.phone.ifBlank { "No Phone" }, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
@@ -594,7 +595,7 @@ private fun DesktopMembersView(
                         Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)) {
                             Row(Modifier.padding(12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
-                                    Text("${m.fullName} (${m.memberNo})", fontWeight = FontWeight.Bold)
+                                    Text(m.fullName, fontWeight = FontWeight.Bold)
                                     Text("${if (language == "sw") "Amelipa" else "Paid"}: ${money(paid)} · ${if (language == "sw") "Baki" else "Balance"}: ${money(balance)}", style = MaterialTheme.typography.bodySmall)
                                 }
                                 OutlinedButton(onClick = { onRecordPaymentForMember(m, selectedBatchYear, period.monthRange.first) }) {
@@ -1383,7 +1384,7 @@ private fun DesktopMaintenanceDialog(
 }
 
 /**
- * LazyColumn with a draggable desktop scrollbar on the right edge.
+ * LazyColumn with a draggable desktop scrollbar on the right edge along with Up/Down scroll buttons.
  * Give it a bounded height (e.g. Modifier.weight(1f) inside a Column).
  */
 @Composable
@@ -1393,21 +1394,61 @@ private fun LazyColumnWithScrollbar(
     content: LazyListScope.() -> Unit
 ) {
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+
     Box(modifier) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize().padding(end = 16.dp),
+            modifier = Modifier.fillMaxSize().padding(end = 28.dp),
             verticalArrangement = verticalArrangement,
             content = content
         )
-        VerticalScrollbar(
-            adapter = rememberScrollbarAdapter(listState),
+
+        Column(
             modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
-            style = LocalScrollbarStyle.current.copy(
-                thickness = 12.dp,
-                unhoverColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
-                hoverColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-            )
-        )
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            IconButton(
+                onClick = {
+                    scope.launch {
+                        listState.animateScrollBy(-250f)
+                    }
+                },
+                modifier = Modifier.size(22.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ArrowDropUp,
+                    contentDescription = "Scroll Up",
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                )
+            }
+
+            Box(modifier = Modifier.weight(1f)) {
+                VerticalScrollbar(
+                    adapter = rememberScrollbarAdapter(listState),
+                    modifier = Modifier.align(Alignment.Center).fillMaxHeight(),
+                    style = LocalScrollbarStyle.current.copy(
+                        thickness = 12.dp,
+                        unhoverColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
+                        hoverColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    )
+                )
+            }
+
+            IconButton(
+                onClick = {
+                    scope.launch {
+                        listState.animateScrollBy(250f)
+                    }
+                },
+                modifier = Modifier.size(22.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ArrowDropDown,
+                    contentDescription = "Scroll Down",
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                )
+            }
+        }
     }
 }
